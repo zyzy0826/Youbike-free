@@ -1,17 +1,86 @@
 """測試 API 擷取與快取機制。"""
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
-
-def test_fetch_taipei_stations_returns_list():
-    """台北 API 應回傳非空 station list。"""
-    pytest.skip("Phase 1 待實作")
-
-
-def test_cache_hit_within_ttl():
-    """快取在 TTL 內應直接讀檔，不打 API。"""
-    pytest.skip("Phase 1 待實作")
+from data.fetcher import (
+    FetchError,
+    fetch_city_stations,
+    _save_cache,
+    _load_cache,
+)
 
 
-def test_cache_expired_refetches():
-    """快取過期應重新呼叫 API。"""
-    pytest.skip("Phase 1 待實作")
+SAMPLE_STATIONS = [
+    {"sno": "500101001", "sna": "捷運市政府站", "lat": 25.04, "lng": 121.56,
+     "tot": 60, "sbi": 30, "bemp": 30},
+    {"sno": "500101002", "sna": "市政府轉運站", "lat": 25.04, "lng": 121.57,
+     "tot": 40, "sbi": 20, "bemp": 20},
+]
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+    def raise_for_status(self): pass
+    def json(self): return self._payload
+
+
+@pytest.fixture
+def tmp_cache(tmp_path: Path) -> Path:
+    return tmp_path / "cache"
+
+
+def test_unknown_city_raises(tmp_cache: Path):
+    with pytest.raises(ValueError):
+        fetch_city_stations("火星市", cache_dir=tmp_cache)
+
+
+def test_city_without_api_url_raises(tmp_cache: Path):
+    with pytest.raises(FetchError):
+        fetch_city_stations("桃園市", use_cache=False, cache_dir=tmp_cache)
+
+
+def test_fetch_writes_cache(tmp_cache: Path):
+    with patch("data.fetcher.requests.get", return_value=_FakeResp(SAMPLE_STATIONS)):
+        data = fetch_city_stations("台北市", use_cache=False, cache_dir=tmp_cache)
+    assert data == SAMPLE_STATIONS
+    assert (tmp_cache / "台北市.json").exists()
+
+
+def test_cache_hit_within_ttl(tmp_cache: Path):
+    _save_cache("台北市", SAMPLE_STATIONS, tmp_cache)
+    with patch("data.fetcher.requests.get") as mock_get:
+        data = fetch_city_stations("台北市", cache_ttl=300, cache_dir=tmp_cache)
+        mock_get.assert_not_called()
+    assert data == SAMPLE_STATIONS
+
+
+def test_cache_expired_refetches(tmp_cache: Path):
+    _save_cache("台北市", SAMPLE_STATIONS, tmp_cache)
+    cache_file = tmp_cache / "台北市.json"
+    old = time.time() - 3600
+    os.utime(cache_file, (old, old))
+
+    fresh = [{"sno": "X"}]
+    with patch("data.fetcher.requests.get", return_value=_FakeResp(fresh)) as mock_get:
+        data = fetch_city_stations("台北市", cache_ttl=300, cache_dir=tmp_cache)
+        mock_get.assert_called_once()
+    assert data == fresh
+
+
+def test_corrupt_cache_falls_through(tmp_cache: Path):
+    tmp_cache.mkdir(parents=True, exist_ok=True)
+    (tmp_cache / "台北市.json").write_text("not json", encoding="utf-8")
+    assert _load_cache("台北市", 300, tmp_cache) is None
+
+
+def test_non_list_response_raises(tmp_cache: Path):
+    with patch("data.fetcher.requests.get", return_value=_FakeResp({"oops": True})):
+        with pytest.raises(FetchError):
+            fetch_city_stations("台北市", use_cache=False, cache_dir=tmp_cache)
