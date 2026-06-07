@@ -238,7 +238,7 @@ def _build_prompt(facts_text: str) -> str:
 
 
 def polish_with_gemini(
-    facts_text: str, api_key: str, model: str = "gemini-2.0-flash",
+    facts_text: str, api_key: str, model: str = "gemini-2.5-flash",
     temperature: float = 0.7,
 ) -> str:
     """呼叫 Gemini 將事實潤飾為親切的繁體中文建議。
@@ -285,7 +285,7 @@ def polish_with_gemini(
 
 
 def generate_feedback(
-    facts: RouteFacts, api_key: str | None, model: str = "gemini-2.0-flash",
+    facts: RouteFacts, api_key: str | None, model: str = "gemini-2.5-flash",
 ) -> tuple[str, str, str]:
     """產生回饋。回傳 (文字, 來源, 錯誤訊息)。來源為 'gemini' 或 'template'。
 

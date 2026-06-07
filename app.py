@@ -490,7 +490,7 @@ def _gemini_error_hint(error: str) -> str:
     if "api key not valid" in e or "api_key_invalid" in e or "401" in error:
         return "金鑰無效，請確認 .env 的 GEMINI_API_KEY 沒有多餘空格或引號，並已重啟 streamlit。"
     if "not found" in e or "404" in error:
-        return "模型名稱可能有誤，請在 .env 改用 gemini-2.0-flash 或 gemini-2.5-flash。"
+        return "模型名稱可能有誤，請在 .env 改用 gemini-2.5-flash。"
     if "has not been used" in e or "service_disabled" in e or "403" in error:
         return "請到 Google Cloud Console 為該專案啟用 Generative Language API，或改用 AI Studio 金鑰。"
     return "常見原因：金鑰無效、模型名稱有誤，或未啟用 Generative Language API。"

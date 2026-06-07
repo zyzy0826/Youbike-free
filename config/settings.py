@@ -58,4 +58,4 @@ def gemini_api_key() -> str | None:
 
 def gemini_model() -> str:
     """Gemini 模型名稱，預設用便宜快速的 flash。"""
-    return get("GEMINI_MODEL", "gemini-2.0-flash") or "gemini-2.0-flash"
+    return get("GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash"

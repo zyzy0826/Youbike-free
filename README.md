@@ -79,7 +79,7 @@ GOOGLE_MAPS_API_KEY=你的金鑰
 
 # Google Gemini —— AI 回饋語氣潤飾；申請：https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=你的金鑰
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 未設定金鑰時，App 仍可正常規劃路線：時間以直線估算、AI 建議改用本地文字摘要。

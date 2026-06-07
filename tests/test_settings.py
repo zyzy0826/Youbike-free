@@ -50,7 +50,7 @@ def test_get_treats_empty_as_unset(monkeypatch):
 def test_gemini_model_default(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     settings._loaded = True
-    assert settings.gemini_model() == "gemini-2.0-flash"
+    assert settings.gemini_model() == "gemini-2.5-flash"
 
 
 def test_load_env_missing_file_is_noop(tmp_path):

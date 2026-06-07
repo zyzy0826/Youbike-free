@@ -5,7 +5,7 @@ from app import _gemini_error_hint
 
 
 def test_quota_429_hint():
-    err = "HTTP 429：You exceeded your current quota ... limit: 0, model: gemini-2.0-flash"
+    err = "HTTP 429：You exceeded your current quota ... limit: 0, model: gemini-2.5-flash"
     hint = _gemini_error_hint(err)
     assert "配額" in hint
     assert "免費額度" in hint
