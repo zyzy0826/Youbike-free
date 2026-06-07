@@ -24,14 +24,14 @@ CITY_CONFIG = {
     "桃園市": {
         "free_minutes": 60,
         "eligibility": "TPASS 月票",
-        "api_url": "TODO_NEED_TO_FIND",
+        "api_url": "https://opendata.tycg.gov.tw/api/v1/dataset.api_access?rid=08274d61-edbe-419d-8fcc-7a643831283d&format=json",
         "living_circle": "北北桃",
         "note": "TPASS 用戶前 60 分鐘免費",
     },
     "高雄市": {
         "free_minutes": 30,
         "eligibility": "TPASS / MeN Go",
-        "api_url": "TODO_NEED_TO_FIND",
+        "api_url": "https://openapi.kcg.gov.tw/Api/Service/Get/b4dd9c40-9027-4125-8666-06bef1756092",
         "living_circle": "嘉南高屏",
         "note": "TPASS/MeNGo 用戶前 30 分鐘免費；轉乘大眾運輸 1hr 內借車亦免費",
     },
