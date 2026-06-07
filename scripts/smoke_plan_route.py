@@ -6,7 +6,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.fetcher import fetch_city_stations  # noqa: E402
-from data.preprocessor import filter_invalid_stations, normalize_stations  # noqa: E402
+from data.preprocessor import (  # noqa: E402
+    filter_invalid_stations,
+    merge_cities,
+    normalize_stations,
+)
 from core.graph_builder import build_station_graph  # noqa: E402
 from core.route_optimizer import plan_route  # noqa: E402
 
@@ -15,9 +19,13 @@ TAMSUI_MRT = (25.1677, 121.4456)
 
 
 def main() -> None:
-    raw = fetch_city_stations("台北市")
-    df = filter_invalid_stations(normalize_stations(raw, "台北市"))
-    print(f"有效站點: {len(df)}")
+    dfs = []
+    for city in ("台北市", "新北市"):
+        raw = fetch_city_stations(city)
+        dfs.append(normalize_stations(raw, city))
+        print(f"{city} 原始: {len(raw)} 站")
+    df = filter_invalid_stations(merge_cities(dfs))
+    print(f"合併後有效站點: {len(df)}")
 
     t0 = time.time()
     g = build_station_graph(df, 30, 3, 12.0, 1.3)
