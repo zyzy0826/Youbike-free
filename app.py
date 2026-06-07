@@ -19,7 +19,9 @@ from config import (
     active_cities,
     free_minutes_by_city,
 )
+from config import settings
 from core.geocoder import GeocodeError, geocode_address
+from core.gmaps import GMapsError, get_travel_time
 from core.graph_builder import build_station_graph
 from core.route_optimizer import (
     SAME_STATION_COOLDOWN_MIN,
@@ -45,6 +47,15 @@ SUPPORTED_CITIES = active_cities()
 def geocode_cached(address: str) -> tuple[float, float]:
     """以地址查經緯度，結果快取一天（減少 Nominatim 請求）。"""
     return geocode_address(address)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def gmaps_travel_cached(
+    o_lat: float, o_lon: float, d_lat: float, d_lon: float
+) -> tuple[float, float, str]:
+    """以 Google Maps 取單段騎乘時間，結果快取一小時。回傳 (分鐘, 公里, 模式)。"""
+    tt = get_travel_time(o_lat, o_lon, d_lat, d_lon, settings.google_maps_api_key())
+    return tt.minutes, tt.distance_km, tt.mode
 
 
 @st.cache_data(ttl=300, show_spinner="抓取 YouBike 站點資料中…")
@@ -246,6 +257,52 @@ def render_cooldown_advice(plan: RoutePlan) -> None:
             )
 
 
+def render_google_refinement(
+    plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]
+) -> None:
+    """用 Google Maps 校正每段騎乘時間，並與直線估算比較、標示是否超出免費上限。"""
+    if not settings.google_maps_api_key():
+        st.info("（選用）在 .env 設定 GOOGLE_MAPS_API_KEY 後，可用 Google 校正真實道路時間。")
+        return
+    if not st.button("🛰️ 用 Google Maps 校正騎乘時間"):
+        return
+
+    coords = stations.set_index("station_id")[["lat", "lon", "city"]].to_dict("index")
+    rows = []
+    any_over = False
+    with st.spinner("查詢 Google Maps 中…"):
+        for i, seg in enumerate(plan.segments, 1):
+            a = coords[seg.from_station_id]
+            b = coords[seg.to_station_id]
+            limit = fmbc.get(a["city"], max(fmbc.values()) if fmbc else 30)
+            try:
+                g_min, g_km, mode = gmaps_travel_cached(
+                    a["lat"], a["lon"], b["lat"], b["lon"]
+                )
+                over = g_min > limit
+                any_over = any_over or over
+                rows.append({
+                    "段": i, "起站": seg.from_name, "終站": seg.to_name,
+                    "估算 (分)": round(seg.minutes, 1),
+                    "Google (分)": round(g_min, 1),
+                    "Google 模式": mode,
+                    "免費上限 (分)": limit,
+                    "超時": "⚠️" if over else "",
+                })
+            except GMapsError as e:
+                rows.append({
+                    "段": i, "起站": seg.from_name, "終站": seg.to_name,
+                    "估算 (分)": round(seg.minutes, 1),
+                    "Google (分)": "—", "Google 模式": f"失敗：{e}",
+                    "免費上限 (分)": limit, "超時": "",
+                })
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    if any_over:
+        st.warning("⚠️ 依 Google 校正，部分路段實際時間超過免費上限，該段可能產生費用。")
+    else:
+        st.success("✅ 依 Google 校正，各路段仍在免費上限內。")
+
+
 # ---------- 主流程 ----------
 
 def _resolve_addresses(
@@ -332,6 +389,7 @@ def main() -> None:
         fmbc = free_minutes_by_city(list(inp["cities"]), inp["has_tpass"])
         id_to_city = dict(zip(stations["station_id"], stations["city"]))
         render_itinerary(plan, fmbc, id_to_city)
+        render_google_refinement(plan, stations, fmbc)
         render_cooldown_advice(plan)
 
 
