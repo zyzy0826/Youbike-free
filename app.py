@@ -61,6 +61,7 @@ def get_graph(
     free_minutes: int,
     safety_margin: int,
     allow_cross_circle: bool,
+    require_availability: bool,
 ) -> tuple[nx.DiGraph, pd.DataFrame]:
     df = load_stations(cities)
     if df.empty:
@@ -72,6 +73,7 @@ def get_graph(
         speed_kmh=DEFAULT_CYCLING_SPEED_KMH,
         detour_factor=ROUTE_DETOUR_FACTOR,
         allow_cross_circle=allow_cross_circle,
+        require_availability=require_availability,
     )
     return g, df
 
@@ -103,6 +105,11 @@ def render_sidebar() -> dict:
         "允許跨生活圈（會收 600~1135 元調度費）",
         value=False,
     )
+    require_availability = st.sidebar.checkbox(
+        "只走有車可借 / 有位可還的站",
+        value=True,
+        help="依即時車輛數過濾：借不到車的站不當起點、還不了車的站不當終點",
+    )
 
     st.sidebar.divider()
     st.sidebar.subheader("起點 / 終點")
@@ -128,6 +135,7 @@ def render_sidebar() -> dict:
         "safety_margin": int(safety_margin),
         "strategy": strategy,
         "allow_cross_circle": allow_cross_circle,
+        "require_availability": require_availability,
         "origin": (o_lat, o_lon),
         "destination": (d_lat, d_lon),
         "submit": submit,
@@ -186,6 +194,7 @@ def main() -> None:
         inp["free_minutes"],
         inp["safety_margin"],
         inp["allow_cross_circle"],
+        inp["require_availability"],
     )
     if stations.empty:
         st.error("無法載入任何站點資料。")
