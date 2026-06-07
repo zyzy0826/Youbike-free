@@ -423,6 +423,25 @@ def render_google_refinement(
             st.success("✅ 依 Google 校正，各路段仍在免費上限內。")
 
 
+def _gemini_error_hint(error: str) -> str:
+    """依 Gemini 錯誤訊息給對應的排解提示。"""
+    e = error.lower()
+    if "429" in error or "quota" in e or "resource_exhausted" in e or "rate" in e:
+        return (
+            "這是 Gemini 配額／速率限制（與本程式無關）。free tier 顯示 limit: 0 通常代表"
+            "此金鑰所屬專案沒有免費額度。可：①到 AI Studio 用「新建專案」重新產生金鑰以取得"
+            "免費額度、②或為該專案啟用計費改用付費額度、③或稍等顯示的秒數後重試。"
+            "AI 建議為選用功能，下方本地摘要一樣完整可用。"
+        )
+    if "api key not valid" in e or "api_key_invalid" in e or "401" in error:
+        return "金鑰無效，請確認 .env 的 GEMINI_API_KEY 沒有多餘空格或引號，並已重啟 streamlit。"
+    if "not found" in e or "404" in error:
+        return "模型名稱可能有誤，請在 .env 改用 gemini-2.0-flash 或 gemini-2.5-flash。"
+    if "has not been used" in e or "service_disabled" in e or "403" in error:
+        return "請到 Google Cloud Console 為該專案啟用 Generative Language API，或改用 AI Studio 金鑰。"
+    return "常見原因：金鑰無效、模型名稱有誤，或未啟用 Generative Language API。"
+
+
 def render_ai_feedback(
     plan: RoutePlan,
     stations: pd.DataFrame,
@@ -478,9 +497,8 @@ def render_ai_feedback(
         else:
             if api_key and ar.get("error"):
                 st.warning(
-                    f"Gemini 呼叫失敗，已改顯示本地事實摘要。原因：{ar['error']}\n\n"
-                    "常見原因：模型名稱已淘汰（請在 .env 改用 gemini-2.0-flash）、"
-                    "金鑰無效，或未啟用 Generative Language API。"
+                    f"Gemini 呼叫失敗，已改顯示下方本地事實摘要。\n\n"
+                    f"原因：{ar['error']}\n\n{_gemini_error_hint(ar['error'])}"
                 )
             st.text(ar["text"])
 
