@@ -36,13 +36,15 @@
 - [x] 撰寫 map_renderer 單元測試
 
 ## Phase 5: Streamlit 互動介面
-- [ ] 建立基本頁面佈局（sidebar + 主區域）
-- [ ] 實作城市選擇下拉選單
-- [ ] 實作起終點輸入（地址 geocoding 或地圖點擊）
-- [ ] 實作路線策略切換
-- [ ] 整合 streamlit-folium 顯示地圖
-- [ ] 顯示路線摘要卡片
-- [ ] 顯示詳細行程表
+- [x] 建立基本頁面佈局（sidebar + 主區域）
+- [x] 實作城市選擇下拉選單（multiselect）
+- [x] 實作起終點輸入（先支援經緯度數值輸入；地址 geocoding 留待加強）
+- [x] 實作路線策略切換
+- [x] 整合 streamlit-folium 顯示地圖
+- [x] 顯示路線摘要卡片（4 個 metric）
+- [x] 顯示詳細行程表（含每段免費餘裕）
+- [x] @st.cache_data / cache_resource 加速重複規劃
+- [ ] 地址 → 經緯度 geocoding（geopy Nominatim，建議實際跑時加上）
 
 ## Phase 6: 進階功能（加分項）
 - [ ] 即時車輛數判斷（避免推薦無車/滿位的站）
