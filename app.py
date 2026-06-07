@@ -258,6 +258,11 @@ def render_cooldown_advice(plan: RoutePlan) -> None:
             )
 
 
+def _route_signature(plan: RoutePlan) -> tuple:
+    """以各段起終站 id 組出路線指紋，用來判斷快取的 Google 結果是否仍對應此路線。"""
+    return tuple((s.from_station_id, s.to_station_id) for s in plan.segments)
+
+
 def render_google_refinement(
     plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]
 ) -> None:
@@ -271,6 +276,7 @@ def render_google_refinement(
     coords = stations.set_index("station_id")[["lat", "lon", "city"]].to_dict("index")
     rows = []
     any_over = False
+    google_times: dict[int, tuple[float, str]] = {}
     with st.spinner("查詢 Google Maps 中…"):
         for i, seg in enumerate(plan.segments, 1):
             a = coords[seg.from_station_id]
@@ -282,6 +288,7 @@ def render_google_refinement(
                 )
                 over = g_min > limit
                 any_over = any_over or over
+                google_times[i] = (g_min, mode)
                 rows.append({
                     "段": i, "起站": seg.from_name, "終站": seg.to_name,
                     "估算 (分)": round(seg.minutes, 1),
@@ -297,6 +304,10 @@ def render_google_refinement(
                     "Google (分)": "—", "Google 模式": f"失敗：{e}",
                     "免費上限 (分)": limit, "超時": "",
                 })
+    # 存入 session_state，讓「AI 行程建議」可把 Google 校正結果也納入事實
+    st.session_state["google_times"] = {
+        "sig": _route_signature(plan), "data": google_times,
+    }
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     if any_over:
         st.warning("⚠️ 依 Google 校正，部分路段實際時間超過免費上限，該段可能產生費用。")
@@ -323,14 +334,22 @@ def render_ai_feedback(
             stations["available_docks"],
         )
     }
+    # 若使用者已跑過 Google 校正且對應同一條路線，將結果併入 AI 事實
+    google_times = None
+    cached = st.session_state.get("google_times")
+    if cached and cached.get("sig") == _route_signature(plan):
+        google_times = cached["data"]
+
     facts = collect_facts(
         plan, fmbc, id_to_city,
         origin_label=origin_label, destination_label=destination_label,
-        has_tpass=has_tpass, availability=availability,
+        has_tpass=has_tpass, availability=availability, google_times=google_times,
     )
     api_key = settings.gemini_api_key()
     if not api_key:
         st.caption("（選用）在 .env 設定 GEMINI_API_KEY 後，AI 會把以下事實潤飾成親切建議。")
+    if google_times:
+        st.caption("已納入 Google 校正時間作為事實來源。")
 
     if st.button("產生建議", key="ai_feedback_btn"):
         with st.spinner("整理建議中…"):

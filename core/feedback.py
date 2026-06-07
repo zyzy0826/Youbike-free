@@ -37,6 +37,7 @@ class RouteFacts:
     total_with_walk_min: float
     segments: list[dict] = field(default_factory=list)
     tight_segments: list[dict] = field(default_factory=list)  # 免費餘裕偏少的路段
+    google_over_segments: list[dict] = field(default_factory=list)  # 依 Google 超時的路段
     cooldown_swaps: list[dict] = field(default_factory=list)
     warning: str = ""
     # 即時車況（若有提供 availability）
@@ -56,17 +57,22 @@ def collect_facts(
     has_tpass: bool = False,
     tight_margin_min: float = 5.0,
     availability: dict[str, tuple[int, int]] | None = None,
+    google_times: dict[int, tuple[float, str]] | None = None,
 ) -> RouteFacts:
     """從 RoutePlan 計算客觀事實。免費規則以各段起站縣市為準。
 
     Args:
         availability: {station_id: (可借車輛數, 可還空位數)} 即時車況；提供時會把
             起點借車站、終點還車站、換車點的即時車況納入事實並產生缺車/滿位警示。
+        google_times: {段次(1起): (Google 校正分鐘, 模式)}；提供時逐段併入 Google
+            校正時間，並對「依 Google 超過免費上限」的路段產生警示。
     """
     default_limit = max(fmbc.values()) if fmbc else 30
     avail = availability or {}
+    gtimes = google_times or {}
     segments: list[dict] = []
     tight: list[dict] = []
+    google_over: list[dict] = []
     for i, seg in enumerate(plan.segments, 1):
         city = id_to_city.get(seg.from_station_id, "")
         limit = fmbc.get(city, default_limit)
@@ -80,6 +86,13 @@ def collect_facts(
             "free_limit": limit,
             "margin": round(margin, 1),
         }
+        if i in gtimes:
+            g_min, g_mode = gtimes[i]
+            info["google_minutes"] = round(g_min, 1)
+            info["google_mode"] = g_mode
+            info["google_over"] = g_min > limit
+            if g_min > limit:
+                google_over.append(info)
         segments.append(info)
         if margin < tight_margin_min:
             tight.append(info)
@@ -130,6 +143,7 @@ def collect_facts(
         total_with_walk_min=round(total_with_walk, 1),
         segments=segments,
         tight_segments=tight,
+        google_over_segments=google_over,
         cooldown_swaps=cooldown,
         warning=plan.message,
         start_station=start_station,
@@ -152,9 +166,18 @@ def facts_to_text(facts: RouteFacts) -> str:
         "各段：",
     ]
     for s in facts.segments:
+        g = ""
+        if "google_minutes" in s:
+            g = f"，Google 校正 {s['google_minutes']} 分（{s['google_mode']}）"
         lines.append(
             f"  第{s['index']}段 {s['from']}→{s['to']}（{s['city']}）"
-            f"：騎乘 {s['minutes']} 分，免費上限 {s['free_limit']} 分，餘裕 {s['margin']} 分"
+            f"：騎乘 {s['minutes']} 分，免費上限 {s['free_limit']} 分，餘裕 {s['margin']} 分{g}"
+        )
+    if facts.google_over_segments:
+        names = "、".join(f"第{s['index']}段" for s in facts.google_over_segments)
+        lines.append(
+            f"依 Google 校正，{names}的實際時間已超過免費上限，該段可能產生費用，"
+            "建議改走較短路段或加快。"
         )
     if facts.start_bikes is not None:
         lines.append(f"起點借車站「{facts.start_station}」目前可借車輛：{facts.start_bikes} 台")

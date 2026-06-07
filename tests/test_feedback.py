@@ -87,6 +87,19 @@ def test_collect_facts_without_availability_has_no_warnings():
     assert facts.availability_warnings == []
 
 
+def test_collect_facts_with_google_times_flags_over_limit():
+    # 第1段台北上限30：Google 校正 35 分 → 超時；第2段桃園上限60：Google 50 分 → 未超
+    gtimes = {1: (35.0, "driving_distance"), 2: (50.0, "bicycling")}
+    facts = collect_facts(_plan(), _FMBC, _ID2CITY, google_times=gtimes)
+    assert facts.segments[0]["google_minutes"] == 35.0
+    assert facts.segments[0]["google_over"] is True
+    assert facts.segments[1]["google_over"] is False
+    assert len(facts.google_over_segments) == 1
+    text = facts_to_text(facts)
+    assert "Google 校正 35.0 分" in text
+    assert "超過免費上限" in text
+
+
 def test_generate_feedback_without_key_uses_template():
     text, source = generate_feedback(collect_facts(_plan(), _FMBC, _ID2CITY), api_key=None)
     assert source == "template"
