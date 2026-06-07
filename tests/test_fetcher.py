@@ -42,8 +42,9 @@ def test_unknown_city_raises(tmp_cache: Path):
 
 
 def test_city_without_api_url_raises(tmp_cache: Path):
+    # 屏東縣 api_url 仍為 TODO（未設定），應擲 FetchError
     with pytest.raises(FetchError):
-        fetch_city_stations("桃園市", use_cache=False, cache_dir=tmp_cache)
+        fetch_city_stations("屏東縣", use_cache=False, cache_dir=tmp_cache)
 
 
 def test_fetch_writes_cache(tmp_cache: Path):

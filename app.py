@@ -13,10 +13,11 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from config import (
-    CITY_CONFIG,
     DEFAULT_CYCLING_SPEED_KMH,
     ROUTE_DETOUR_FACTOR,
     SAFETY_MARGIN_MINUTES,
+    active_cities,
+    free_minutes_by_city,
 )
 from core.geocoder import GeocodeError, geocode_address
 from core.graph_builder import build_station_graph
@@ -34,10 +35,8 @@ from data.preprocessor import (
 from visualization.map_renderer import draw_route, render_base_map
 
 
-SUPPORTED_CITIES = [
-    c for c, cfg in CITY_CONFIG.items()
-    if cfg["api_url"] and not cfg["api_url"].startswith("TODO")
-]
+# 目前聚焦北北桃生活圈（其餘縣市暫不在主流程支援）。
+SUPPORTED_CITIES = active_cities()
 
 
 # ---------- 資料載入（含 Streamlit 快取） ----------
@@ -69,7 +68,7 @@ def load_stations(cities: tuple[str, ...]) -> pd.DataFrame:
 @st.cache_resource(show_spinner="建構站點圖中…")
 def get_graph(
     cities: tuple[str, ...],
-    free_minutes: int,
+    has_tpass: bool,
     safety_margin: int,
     allow_cross_circle: bool,
     require_availability: bool,
@@ -77,14 +76,16 @@ def get_graph(
     df = load_stations(cities)
     if df.empty:
         return nx.DiGraph(), df
+    fmbc = free_minutes_by_city(list(cities), has_tpass)
     g = build_station_graph(
         df,
-        free_minutes=free_minutes,
+        free_minutes=max(fmbc.values()) if fmbc else 30,
         safety_margin=safety_margin,
         speed_kmh=DEFAULT_CYCLING_SPEED_KMH,
         detour_factor=ROUTE_DETOUR_FACTOR,
         allow_cross_circle=allow_cross_circle,
         require_availability=require_availability,
+        free_minutes_by_city=fmbc,
     )
     return g, df
 
@@ -94,14 +95,19 @@ def get_graph(
 def render_sidebar() -> dict:
     st.sidebar.header("路線設定")
     cities = st.sidebar.multiselect(
-        "資料來源城市", SUPPORTED_CITIES, default=SUPPORTED_CITIES,
-        help="選多個城市可規劃跨縣市路線（限同生活圈）",
+        "資料來源城市（北北桃）", SUPPORTED_CITIES, default=SUPPORTED_CITIES,
+        help="目前聚焦北北桃生活圈，可規劃台北↔新北↔桃園的跨縣市路線",
     )
-    free_minutes = st.sidebar.number_input(
-        "免費騎乘上限（分鐘）", min_value=10, max_value=120,
-        value=30, step=5,
-        help="台北/新北 30 分鐘，桃園 TPASS 60 分鐘",
+    has_tpass = st.sidebar.toggle(
+        "持有 TPASS 月票",
+        value=False,
+        help="影響免費騎乘上限：桃園一般 30 分、TPASS 60 分；台北/新北皆 30 分",
     )
+    if cities:
+        fmbc = free_minutes_by_city(list(cities), has_tpass)
+        st.sidebar.caption(
+            "各市免費上限：" + "、".join(f"{c} {m} 分" for c, m in fmbc.items())
+        )
     safety_margin = st.sidebar.number_input(
         "安全餘裕（分鐘）", min_value=0, max_value=10,
         value=SAFETY_MARGIN_MINUTES,
@@ -154,7 +160,7 @@ def render_sidebar() -> dict:
 
     return {
         "cities": tuple(cities),
-        "free_minutes": int(free_minutes),
+        "has_tpass": has_tpass,
         "safety_margin": int(safety_margin),
         "strategy": strategy,
         "allow_cross_circle": allow_cross_circle,
@@ -184,16 +190,25 @@ def render_summary(plan: RoutePlan) -> None:
     cols[3].metric("總時間（含步行）", f"{total:.1f} 分")
 
 
-def render_itinerary(plan: RoutePlan, free_minutes: int) -> None:
+def render_itinerary(
+    plan: RoutePlan,
+    fmbc: dict[str, int],
+    id_to_city: dict[str, str],
+) -> None:
     if not plan.feasible or not plan.segments:
         return
     rows = []
     for i, seg in enumerate(plan.segments, 1):
-        margin = free_minutes - seg.minutes
+        # 免費規則以借車地（起站縣市）為準，逐段可能不同（如桃園 vs 台北）
+        city = id_to_city.get(seg.from_station_id, "")
+        limit = fmbc.get(city, max(fmbc.values()) if fmbc else 30)
+        margin = limit - seg.minutes
         rows.append({
             "段": i,
             "起站": seg.from_name,
             "終站": seg.to_name,
+            "起站縣市": city,
+            "免費上限 (分)": limit,
             "騎乘時間 (分)": round(seg.minutes, 1),
             "距離 (km)": round(seg.distance_km, 2),
             "免費餘裕 (分)": round(margin, 1),
@@ -263,7 +278,7 @@ def main() -> None:
 
     graph, stations = get_graph(
         inp["cities"],
-        inp["free_minutes"],
+        inp["has_tpass"],
         inp["safety_margin"],
         inp["allow_cross_circle"],
         inp["require_availability"],
@@ -314,7 +329,9 @@ def main() -> None:
 
     if plan is not None and plan.feasible:
         st.subheader("詳細行程")
-        render_itinerary(plan, inp["free_minutes"])
+        fmbc = free_minutes_by_city(list(inp["cities"]), inp["has_tpass"])
+        id_to_city = dict(zip(stations["station_id"], stations["city"]))
+        render_itinerary(plan, fmbc, id_to_city)
         render_cooldown_advice(plan)
 
 
