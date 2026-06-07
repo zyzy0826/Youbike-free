@@ -258,10 +258,23 @@ def polish_with_gemini(
         resp = requests.post(
             url, params={"key": api_key}, json=payload, timeout=_REQUEST_TIMEOUT
         )
-        resp.raise_for_status()
-        data = resp.json()
     except requests.RequestException as e:
-        raise GeminiError(f"Gemini 請求失敗：{e}") from e
+        raise GeminiError(f"Gemini 連線失敗：{e}") from e
+
+    # 非 200 時讀取 Google 回傳的 error.message（如金鑰無效、模型不存在、API 未啟用），
+    # 直接呈現確切原因，而非只給 HTTP 狀態碼。
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = resp.json().get("error", {}).get("message", "")
+        except ValueError:
+            detail = (resp.text or "")[:300]
+        raise GeminiError(f"HTTP {resp.status_code}：{detail}".strip())
+
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise GeminiError(f"Gemini 回應非 JSON：{e}") from e
 
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()

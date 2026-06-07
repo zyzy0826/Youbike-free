@@ -138,16 +138,28 @@ def test_polish_with_gemini_parses_response():
         "candidates": [{"content": {"parts": [{"text": "  親切建議內容  "}]}}]
     }
     resp = MagicMock()
-    resp.raise_for_status = MagicMock()
+    resp.status_code = 200
     resp.json = MagicMock(return_value=payload)
     with patch("core.feedback.requests.post", return_value=resp):
         out = polish_with_gemini("facts", api_key="k")
     assert out == "親切建議內容"
 
 
+def test_polish_http_error_surfaces_google_message():
+    # 模擬 Google 回傳 403 + error.message（如 API 未啟用 / 金鑰無效）
+    resp = MagicMock()
+    resp.status_code = 403
+    resp.json = MagicMock(return_value={
+        "error": {"message": "Generative Language API has not been used in project 123..."}
+    })
+    with patch("core.feedback.requests.post", return_value=resp):
+        with pytest.raises(GeminiError, match="has not been used"):
+            polish_with_gemini("facts", api_key="k")
+
+
 def test_generate_feedback_falls_back_on_gemini_error():
     resp = MagicMock()
-    resp.raise_for_status = MagicMock()
+    resp.status_code = 200
     resp.json = MagicMock(return_value={"promptFeedback": {"blockReason": "SAFETY"}})
     with patch("core.feedback.requests.post", return_value=resp):
         text, source, error = generate_feedback(
