@@ -23,8 +23,9 @@ from config import (
 from config import settings
 from core.cooldown import build_cooldown_graph, plan_cooldown_route
 from core.feedback import collect_facts, generate_feedback
-from core.geocoder import GeocodeError, geocode_address
+from core.geocoder import GeocodeError, geocode_address_verbose
 from core.gmaps import GMapsError, get_travel_time
+from core.time_estimator import haversine_km
 from core.graph_builder import build_station_graph
 from core.route_optimizer import (
     SAME_STATION_COOLDOWN_MIN,
@@ -61,9 +62,9 @@ def _bridge_secrets_to_env() -> None:
 # ---------- 資料載入（含 Streamlit 快取） ----------
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def geocode_cached(address: str) -> tuple[float, float]:
-    """以地址查經緯度，結果快取一天（減少 Nominatim 請求）。"""
-    return geocode_address(address)
+def geocode_cached(address: str) -> tuple[float, float, str]:
+    """以地址查經緯度與匹配地名，結果快取一天（減少 Nominatim 請求）。"""
+    return geocode_address_verbose(address)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -318,6 +319,29 @@ def render_cooldown_advice(plan: RoutePlan) -> None:
             )
 
 
+def _render_endpoint_diagnostic(result: dict) -> None:
+    """顯示實際選用的起/終借還站，以及它們距「你設定的起終點」多遠。
+
+    若距離偏大，通常代表起終點座標/地址解析有誤（例如想去淡水卻解析到市中心），
+    讓使用者一眼看出路線為何怪異。
+    """
+    plan = result["plan"]
+    if not plan.feasible or not plan.segments:
+        return
+    coords = result["stations"].set_index("station_id")[["lat", "lon"]].to_dict("index")
+    s_id = plan.segments[0].from_station_id
+    e_id = plan.segments[-1].to_station_id
+    s, e = coords.get(s_id), coords.get(e_id)
+    if not s or not e:
+        return
+    o_lat, o_lon = result["origin"]
+    d_lat, d_lon = result["destination"]
+    d_start = haversine_km(o_lat, o_lon, s["lat"], s["lon"])
+    d_end = haversine_km(d_lat, d_lon, e["lat"], e["lon"])
+    st.caption(f"🚲 起點借車站：{plan.segments[0].from_name}（距你設定的起點 {d_start:.2f} km）")
+    st.caption(f"🏁 終點還車站：{plan.segments[-1].to_name}（距你設定的終點 {d_end:.2f} km）")
+
+
 def _route_signature(plan: RoutePlan) -> tuple:
     """以各段起終站 id 組出路線指紋，用來判斷快取的 Google 結果是否仍對應此路線。"""
     return tuple((s.from_station_id, s.to_station_id) for s in plan.segments)
@@ -468,16 +492,17 @@ def _resolve_addresses(
 ) -> tuple[tuple[float, float], tuple[float, float]] | None:
     """將起終點地址轉成經緯度。任一失敗則顯示錯誤並回傳 None。"""
     try:
-        origin = geocode_cached(origin_address)
-        destination = geocode_cached(destination_address)
+        o_lat, o_lon, o_name = geocode_cached(origin_address)
+        d_lat, d_lon, d_name = geocode_cached(destination_address)
     except GeocodeError as e:
         st.error(f"❌ 地址解析失敗：{e}")
         return None
-    st.caption(
-        f"📍 起點 {origin_address} → {origin[0]:.5f}, {origin[1]:.5f}；"
-        f"終點 {destination_address} → {destination[0]:.5f}, {destination[1]:.5f}"
+    # 顯示實際匹配到的地名，方便確認是否解析正確（地名不符常是路線怪異的主因）
+    st.info(
+        f"📍 起點「{origin_address}」→ {o_name}（{o_lat:.5f}, {o_lon:.5f}）\n\n"
+        f"🏁 終點「{destination_address}」→ {d_name}（{d_lat:.5f}, {d_lon:.5f}）"
     )
-    return origin, destination
+    return (o_lat, o_lon), (d_lat, d_lon)
 
 
 def main() -> None:
@@ -573,6 +598,7 @@ def main() -> None:
         else:
             st.caption(f"規劃耗時 {result['elapsed_ms']:.0f} ms")
             render_summary(result["plan"])
+            _render_endpoint_diagnostic(result)
 
     if result is not None and result["plan"].feasible:
         st.subheader("詳細行程")

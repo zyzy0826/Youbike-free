@@ -34,6 +34,19 @@ def test_geocode_success():
     assert lon == pytest.approx(121.5170)
 
 
+def test_geocode_verbose_returns_matched_name():
+    from core.geocoder import geocode_address_verbose
+
+    loc = _fake_location(25.0, 121.5)
+    loc.address = "淡水捷運站, 新北市, 台灣"
+    fake = MagicMock()
+    fake.geocode.return_value = loc
+    with patch.object(geocoder, "_get_geocoder", return_value=fake):
+        lat, lon, name = geocode_address_verbose("淡水捷運站")
+    assert (lat, lon) == (25.0, 121.5)
+    assert "淡水" in name
+
+
 def test_geocode_empty_address_raises():
     with pytest.raises(GeocodeError):
         geocode_address("   ")

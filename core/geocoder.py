@@ -53,7 +53,19 @@ def geocode_address(
     address: str,
     country_codes: str | None = _DEFAULT_COUNTRY_CODES,
 ) -> tuple[float, float]:
-    """將地址轉換為 (緯度, 經度)。
+    """將地址轉換為 (緯度, 經度)。"""
+    lat, lon, _ = geocode_address_verbose(address, country_codes)
+    return lat, lon
+
+
+def geocode_address_verbose(
+    address: str,
+    country_codes: str | None = _DEFAULT_COUNTRY_CODES,
+) -> tuple[float, float, str]:
+    """將地址轉換為 (緯度, 經度, 匹配到的完整名稱)。
+
+    回傳第三個值為 Nominatim 實際匹配到的地點全名，可用於讓使用者確認是否解析正確
+    （例如輸入「淡水捷運站」卻被匹配到別處時，全名會一眼看出）。
 
     Args:
         address: 欲查詢的地址或地標名稱（如「台北車站」）。
@@ -88,6 +100,7 @@ def geocode_address(
     if location is None:
         raise GeocodeError(f"查無此地址：{query}")
 
-    result = (location.latitude, location.longitude)
+    display = getattr(location, "address", None) or query
+    result = (location.latitude, location.longitude, str(display))
     _cache[cache_key] = result
     return result
