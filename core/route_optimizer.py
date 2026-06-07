@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import networkx as nx
@@ -23,6 +23,12 @@ Strategy = Literal["fewest_swaps", "shortest_time"]
 
 MAX_WALK_KM = 1.0  # 起終點到最近站可接受的最大步行距離
 
+# 同站續借冷卻：實測還車後約需等 10~15 分鐘才能在同一站再借。
+SAME_STATION_COOLDOWN_MIN = (10, 15)
+# 換車點建議改借的鄰近站搜尋半徑（公里）與筆數。
+NEARBY_RENT_RADIUS_KM = 0.3
+NEARBY_RENT_COUNT = 3
+
 
 @dataclass
 class RouteSegment:
@@ -36,6 +42,15 @@ class RouteSegment:
 
 
 @dataclass
+class SwapAdvice:
+    """換車點的同站續借冷卻提醒與鄰近改借建議。"""
+    station_id: str
+    station_name: str
+    # 鄰近可改借的替代站：(站名, 步行分鐘, 距離公里, 可借車輛數)
+    alternatives: list[tuple[str, float, float, int]] = field(default_factory=list)
+
+
+@dataclass
 class RoutePlan:
     """完整路線規劃結果。"""
     segments: list[RouteSegment]
@@ -46,6 +61,7 @@ class RoutePlan:
     strategy: Strategy
     feasible: bool
     message: str = ""
+    swap_advice: list[SwapAdvice] = field(default_factory=list)
 
 
 def _haversine_km_vec(
@@ -77,6 +93,62 @@ def find_nearest_station(
     dists = _haversine_km_vec(lat, lon, lats, lons)
     idx = int(np.argmin(dists))
     return str(stations.iloc[idx]["station_id"]), float(dists[idx])
+
+
+def find_nearby_rent_alternatives(
+    station_id: str,
+    stations: pd.DataFrame,
+    max_walk_km: float = NEARBY_RENT_RADIUS_KM,
+    count: int = NEARBY_RENT_COUNT,
+) -> list[tuple[str, float, float, int]]:
+    """找出 station_id 鄰近、可改借車的替代站（避免同站續借冷卻）。
+
+    只回傳「有車可借」（available_bikes > 0）且非自身、位於步行半徑內的站，
+    依距離由近到遠排序。回傳 (站名, 步行分鐘, 距離公里, 可借車輛數)。
+    """
+    rows = stations[stations["station_id"] == station_id]
+    if rows.empty:
+        return []
+    origin = rows.iloc[0]
+    o_lat, o_lon = float(origin["lat"]), float(origin["lon"])
+
+    others = stations[stations["station_id"] != station_id]
+    if others.empty:
+        return []
+    lats = others["lat"].to_numpy(dtype=float)
+    lons = others["lon"].to_numpy(dtype=float)
+    dists = _haversine_km_vec(o_lat, o_lon, lats, lons)
+
+    results: list[tuple[str, float, float, int]] = []
+    for row, dist in zip(others.itertuples(), dists):
+        if dist > max_walk_km:
+            continue
+        bikes = int(row.available_bikes or 0)
+        if bikes <= 0:
+            continue
+        walk_min = estimate_walking_time(o_lat, o_lon, float(row.lat), float(row.lon))
+        results.append((str(row.name), walk_min, float(dist), bikes))
+
+    results.sort(key=lambda t: t[2])
+    return results[:count]
+
+
+def _build_swap_advice(
+    segments: list[RouteSegment], stations: pd.DataFrame
+) -> list[SwapAdvice]:
+    """為每個換車點（中間站）建立同站續借冷卻提醒與鄰近改借建議。"""
+    advice: list[SwapAdvice] = []
+    # 換車點 = 每段的終站，最後一段除外（最後一段終站是目的地，不再續借）
+    for seg in segments[:-1]:
+        alts = find_nearby_rent_alternatives(seg.to_station_id, stations)
+        advice.append(
+            SwapAdvice(
+                station_id=seg.to_station_id,
+                station_name=seg.to_name,
+                alternatives=alts,
+            )
+        )
+    return advice
 
 
 def _build_segments(
@@ -179,4 +251,5 @@ def plan_route(
         strategy=strategy,
         feasible=True,
         message=msg,
+        swap_advice=_build_swap_advice(segments, stations),
     )

@@ -20,7 +20,11 @@ from config import (
 )
 from core.geocoder import GeocodeError, geocode_address
 from core.graph_builder import build_station_graph
-from core.route_optimizer import RoutePlan, plan_route
+from core.route_optimizer import (
+    SAME_STATION_COOLDOWN_MIN,
+    RoutePlan,
+    plan_route,
+)
 from data.fetcher import FetchError, fetch_city_stations
 from data.preprocessor import (
     filter_invalid_stations,
@@ -198,6 +202,35 @@ def render_itinerary(plan: RoutePlan, free_minutes: int) -> None:
     st.dataframe(df, hide_index=True, use_container_width=True)
 
 
+def render_cooldown_advice(plan: RoutePlan) -> None:
+    """顯示同站續借冷卻提醒與鄰近改借建議。"""
+    if not plan.swap_advice:
+        return
+    lo, hi = SAME_STATION_COOLDOWN_MIN
+    st.subheader("🔁 換車點冷卻提醒")
+    st.caption(
+        f"在換車點還車後，於同一站再借同型車可能需等 {lo}~{hi} 分鐘冷卻。"
+        "建議改到鄰近站借車，或改用雙卡輪替。"
+    )
+    for i, adv in enumerate(plan.swap_advice, 1):
+        with st.expander(f"換車點 #{i}：{adv.station_name}", expanded=False):
+            if not adv.alternatives:
+                st.write("附近 300m 內查無其他有車可借的站，建議於原站等候冷卻時間。")
+                continue
+            alt_rows = [
+                {
+                    "改借站": name,
+                    "步行 (分)": round(walk_min, 1),
+                    "距離 (km)": round(dist, 2),
+                    "可借車": bikes,
+                }
+                for name, walk_min, dist, bikes in adv.alternatives
+            ]
+            st.dataframe(
+                pd.DataFrame(alt_rows), hide_index=True, use_container_width=True
+            )
+
+
 # ---------- 主流程 ----------
 
 def _resolve_addresses(
@@ -282,6 +315,7 @@ def main() -> None:
     if plan is not None and plan.feasible:
         st.subheader("詳細行程")
         render_itinerary(plan, inp["free_minutes"])
+        render_cooldown_advice(plan)
 
 
 if __name__ == "__main__":
