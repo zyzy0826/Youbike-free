@@ -73,12 +73,24 @@ def collect_facts(
     segments: list[dict] = []
     tight: list[dict] = []
     google_over: list[dict] = []
+    transfer_count = 0
     for i, seg in enumerate(plan.segments, 1):
+        mode = getattr(seg, "mode", "ride")
+        if mode != "ride":
+            # node-split 冷卻模型的步行換車 / 等冷卻段
+            transfer_count += 1
+            segments.append({
+                "index": i, "mode": mode,
+                "from": seg.from_name, "to": seg.to_name,
+                "minutes": round(seg.minutes, 1),
+            })
+            continue
         city = id_to_city.get(seg.from_station_id, "")
         limit = fmbc.get(city, default_limit)
         margin = limit - seg.minutes
         info = {
             "index": i,
+            "mode": "ride",
             "from": seg.from_name,
             "to": seg.to_name,
             "city": city,
@@ -165,7 +177,14 @@ def facts_to_text(facts: RouteFacts) -> str:
         f"含步行總時間：{facts.total_with_walk_min} 分鐘",
         "各段：",
     ]
+    transfer_label = {"walk": "步行換車", "wait": "原站等冷卻"}
     for s in facts.segments:
+        if s.get("mode", "ride") != "ride":
+            label = transfer_label.get(s["mode"], s["mode"])
+            lines.append(
+                f"  第{s['index']}段（{label}）{s['from']}→{s['to']}：{s['minutes']} 分"
+            )
+            continue
         g = ""
         if "google_minutes" in s:
             g = f"，Google 校正 {s['google_minutes']} 分（{s['google_mode']}）"

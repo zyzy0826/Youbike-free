@@ -58,6 +58,67 @@ def test_draw_route_with_feasible_plan():
     assert "起點" in html and "終點" in html
 
 
+def test_draw_route_with_cooldown_modes_renders():
+    import folium
+    df = pd.DataFrame([
+        {"station_id": "A", "name": "A", "lat": 25.0, "lon": 121.5,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "B", "name": "B", "lat": 25.01, "lon": 121.51,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "Bn", "name": "B鄰", "lat": 25.0105, "lon": 121.5105,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "C", "name": "C", "lat": 25.02, "lon": 121.52,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+    ])
+    df["available_bikes"] = df["available_bikes"].astype("Int64")
+    df["available_docks"] = df["available_docks"].astype("Int64")
+    plan = RoutePlan(
+        segments=[
+            RouteSegment("A", "B", "A", "B", 10.0, 1.5, mode="ride"),
+            RouteSegment("B", "Bn", "B", "B鄰", 1.0, 0.1, mode="walk"),
+            RouteSegment("Bn", "C", "B鄰", "C", 9.0, 1.4, mode="ride"),
+        ],
+        total_minutes=19.0, swap_count=1,
+        walk_to_start_min=1.0, walk_from_end_min=1.0,
+        strategy="shortest_time", feasible=True, transfer_minutes=1.0,
+    )
+    m = render_base_map(df)
+    out = draw_route(m, plan, df, (25.0, 121.5), (25.02, 121.52))
+    assert isinstance(out, folium.Map)
+    # 以 ASCII 結構標記驗證（folium 會把中文 DivIcon 文字轉成 \uXXXX，故不直接比中文）
+    html = out.get_root().render()
+    assert "dashArray" in html       # 步行換車段以虛線繪製
+    assert "clock-o" not in html     # 此路線以步行換車，無等冷卻段
+
+
+def test_draw_route_wait_segment_adds_cooldown_marker():
+    import folium
+    df = pd.DataFrame([
+        {"station_id": "A", "name": "A", "lat": 25.0, "lon": 121.5,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "B", "name": "B", "lat": 25.01, "lon": 121.51,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "C", "name": "C", "lat": 25.02, "lon": 121.52,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+    ])
+    df["available_bikes"] = df["available_bikes"].astype("Int64")
+    df["available_docks"] = df["available_docks"].astype("Int64")
+    plan = RoutePlan(
+        segments=[
+            RouteSegment("A", "B", "A", "B", 10.0, 1.5, mode="ride"),
+            RouteSegment("B", "B", "B", "B", 12.0, 0.0, mode="wait"),
+            RouteSegment("B", "C", "B", "C", 9.0, 1.4, mode="ride"),
+        ],
+        total_minutes=19.0, swap_count=1,
+        walk_to_start_min=1.0, walk_from_end_min=1.0,
+        strategy="shortest_time", feasible=True, transfer_minutes=12.0,
+    )
+    out = draw_route(render_base_map(df), plan, df, (25.0, 121.5), (25.02, 121.52))
+    html = out.get_root().render()
+    assert "clock-o" in html          # 等冷卻 marker
+    assert isinstance(out, folium.Map)
+
+
 def test_draw_route_with_infeasible_plan_still_marks_endpoints():
     stations = _sample_stations()
     plan = RoutePlan(

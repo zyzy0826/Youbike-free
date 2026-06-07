@@ -20,6 +20,7 @@ from config import (
     free_minutes_by_city,
 )
 from config import settings
+from core.cooldown import build_cooldown_graph, plan_cooldown_route
 from core.feedback import collect_facts, generate_feedback
 from core.geocoder import GeocodeError, geocode_address
 from core.gmaps import GMapsError, get_travel_time
@@ -84,13 +85,13 @@ def get_graph(
     safety_margin: int,
     allow_cross_circle: bool,
     require_availability: bool,
+    use_cooldown: bool,
 ) -> tuple[nx.DiGraph, pd.DataFrame]:
     df = load_stations(cities)
     if df.empty:
         return nx.DiGraph(), df
     fmbc = free_minutes_by_city(list(cities), has_tpass)
-    g = build_station_graph(
-        df,
+    common = dict(
         free_minutes=max(fmbc.values()) if fmbc else 30,
         safety_margin=safety_margin,
         speed_kmh=DEFAULT_CYCLING_SPEED_KMH,
@@ -99,6 +100,10 @@ def get_graph(
         require_availability=require_availability,
         free_minutes_by_city=fmbc,
     )
+    if use_cooldown:
+        g = build_cooldown_graph(df, **common)
+    else:
+        g = build_station_graph(df, **common)
     return g, df
 
 
@@ -139,6 +144,12 @@ def render_sidebar() -> dict:
         value=True,
         help="依即時車輛數過濾：借不到車的站不當起點、還不了車的站不當終點",
     )
+    use_cooldown = st.sidebar.checkbox(
+        "啟用步行換車（同站續借冷卻模型）",
+        value=False,
+        help="進階：換車時改以「步行到鄰站借車」或「原站等冷卻」建模，"
+             "讓路線把同站續借的 10~15 分鐘冷卻一併納入最佳化",
+    )
 
     st.sidebar.divider()
     st.sidebar.subheader("起點 / 終點")
@@ -177,6 +188,7 @@ def render_sidebar() -> dict:
         "strategy": strategy,
         "allow_cross_circle": allow_cross_circle,
         "require_availability": require_availability,
+        "use_cooldown": use_cooldown,
         "use_address": use_address,
         "origin_address": o_addr,
         "destination_address": d_addr,
@@ -198,8 +210,11 @@ def render_summary(plan: RoutePlan) -> None:
     cols[1].metric("總騎乘時間", f"{plan.total_minutes:.1f} 分")
     cols[2].metric("步行（起 / 終）",
                    f"{plan.walk_to_start_min:.1f} / {plan.walk_from_end_min:.1f} 分")
-    total = plan.total_minutes + plan.walk_to_start_min + plan.walk_from_end_min
+    total = (plan.total_minutes + plan.transfer_minutes
+             + plan.walk_to_start_min + plan.walk_from_end_min)
     cols[3].metric("總時間（含步行）", f"{total:.1f} 分")
+    if plan.transfer_minutes > 0:
+        st.caption(f"含換車（步行 / 等冷卻）時間約 {plan.transfer_minutes:.1f} 分")
 
 
 def render_itinerary(
@@ -209,21 +224,27 @@ def render_itinerary(
 ) -> None:
     if not plan.feasible or not plan.segments:
         return
+    mode_label = {"ride": "🚲 騎乘", "walk": "🚶 步行換車", "wait": "⏱️ 等冷卻"}
     rows = []
     for i, seg in enumerate(plan.segments, 1):
+        if seg.mode != "ride":
+            # 步行換車 / 等冷卻段：無免費上限概念
+            rows.append({
+                "段": i, "類型": mode_label.get(seg.mode, seg.mode),
+                "起站": seg.from_name, "終站": seg.to_name, "起站縣市": "",
+                "免費上限 (分)": "—", "時間 (分)": round(seg.minutes, 1),
+                "距離 (km)": round(seg.distance_km, 2), "免費餘裕 (分)": "—",
+            })
+            continue
         # 免費規則以借車地（起站縣市）為準，逐段可能不同（如桃園 vs 台北）
         city = id_to_city.get(seg.from_station_id, "")
         limit = fmbc.get(city, max(fmbc.values()) if fmbc else 30)
         margin = limit - seg.minutes
         rows.append({
-            "段": i,
-            "起站": seg.from_name,
-            "終站": seg.to_name,
-            "起站縣市": city,
-            "免費上限 (分)": limit,
-            "騎乘時間 (分)": round(seg.minutes, 1),
-            "距離 (km)": round(seg.distance_km, 2),
-            "免費餘裕 (分)": round(margin, 1),
+            "段": i, "類型": mode_label["ride"],
+            "起站": seg.from_name, "終站": seg.to_name, "起站縣市": city,
+            "免費上限 (分)": limit, "時間 (分)": round(seg.minutes, 1),
+            "距離 (km)": round(seg.distance_km, 2), "免費餘裕 (分)": round(margin, 1),
         })
     df = pd.DataFrame(rows)
     st.dataframe(df, hide_index=True, use_container_width=True)
@@ -279,6 +300,8 @@ def render_google_refinement(
     google_times: dict[int, tuple[float, str]] = {}
     with st.spinner("查詢 Google Maps 中…"):
         for i, seg in enumerate(plan.segments, 1):
+            if seg.mode != "ride":
+                continue  # 步行 / 等冷卻段不需 Google 校正
             a = coords[seg.from_station_id]
             b = coords[seg.to_station_id]
             limit = fmbc.get(a["city"], max(fmbc.values()) if fmbc else 30)
@@ -400,6 +423,7 @@ def main() -> None:
         inp["safety_margin"],
         inp["allow_cross_circle"],
         inp["require_availability"],
+        inp["use_cooldown"],
     )
     if stations.empty:
         st.error("無法載入任何站點資料。")
@@ -420,11 +444,14 @@ def main() -> None:
     plan: RoutePlan | None = None
     if inp["submit"]:
         t0 = time.time()
-        plan = plan_route(
-            graph, stations,
-            origin, destination,
-            strategy=inp["strategy"],
-        )
+        if inp["use_cooldown"]:
+            plan = plan_cooldown_route(
+                graph, stations, origin, destination, strategy=inp["strategy"]
+            )
+        else:
+            plan = plan_route(
+                graph, stations, origin, destination, strategy=inp["strategy"]
+            )
         st.caption(f"規劃耗時 {(time.time() - t0) * 1000:.0f} ms")
 
     # 地圖

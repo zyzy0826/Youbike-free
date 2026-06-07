@@ -87,6 +87,30 @@ def test_collect_facts_without_availability_has_no_warnings():
     assert facts.availability_warnings == []
 
 
+def test_collect_facts_handles_cooldown_walk_wait_segments():
+    # node-split 模式：ride → walk → ride 的混合段
+    segs = [
+        RouteSegment("台北市_1", "台北市_2", "A站", "B站", 25.0, 5.0, mode="ride"),
+        RouteSegment("台北市_2", "台北市_5", "B站", "B鄰站", 2.5, 0.2, mode="walk"),
+        RouteSegment("台北市_5", "台北市_4", "B鄰站", "D站", 20.0, 4.0, mode="ride"),
+    ]
+    plan = RoutePlan(
+        segments=segs, total_minutes=45.0, swap_count=1,
+        walk_to_start_min=3.0, walk_from_end_min=4.0,
+        strategy="shortest_time", feasible=True, transfer_minutes=2.5,
+    )
+    fmbc = {"台北市": 30}
+    id2city = {"台北市_1": "台北市", "台北市_2": "台北市",
+               "台北市_5": "台北市", "台北市_4": "台北市"}
+    facts = collect_facts(plan, fmbc, id2city)
+    # 兩段 ride 各有 margin，walk 段不算 free_limit
+    ride_infos = [s for s in facts.segments if s.get("mode") == "ride"]
+    walk_infos = [s for s in facts.segments if s.get("mode") == "walk"]
+    assert len(ride_infos) == 2 and len(walk_infos) == 1
+    text = facts_to_text(facts)
+    assert "步行換車" in text  # 轉乘段被描述
+
+
 def test_collect_facts_with_google_times_flags_over_limit():
     # 第1段台北上限30：Google 校正 35 分 → 超時；第2段桃園上限60：Google 50 分 → 未超
     gtimes = {1: (35.0, "driving_distance"), 2: (50.0, "bicycling")}
