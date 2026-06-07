@@ -347,6 +347,66 @@ def _route_signature(plan: RoutePlan) -> tuple:
     return tuple((s.from_station_id, s.to_station_id) for s in plan.segments)
 
 
+def _ride_edge_key(from_id: str, to_id: str, use_cooldown: bool):
+    """回傳該騎乘段在圖中對應的邊鍵（一般圖 vs node-split 冷卻圖節點型態不同）。"""
+    if use_cooldown:
+        return ((from_id, "out"), (to_id, "in"))
+    return (from_id, to_id)
+
+
+def _plan_on(graph, stations, origin, destination, strategy, use_cooldown) -> RoutePlan:
+    if use_cooldown:
+        return plan_cooldown_route(graph, stations, origin, destination, strategy=strategy)
+    return plan_route(graph, stations, origin, destination, strategy=strategy)
+
+
+def plan_with_google_validation(
+    graph: nx.DiGraph, stations: pd.DataFrame,
+    origin: tuple[float, float], destination: tuple[float, float],
+    strategy: str, fmbc: dict[str, int], use_cooldown: bool, max_iter: int = 4,
+):
+    """規劃路線，並以 Google 實測時間驗證：若某段實際 > 該段免費上限，移除該邊後重新
+    規劃，直到各段都通過或無法再避開。
+
+    回傳 (plan, google_rows, any_over, google_times, removed_count)。
+    """
+    removed: list = []
+    default_limit = max(fmbc.values()) if fmbc else 30
+    plan = _plan_on(graph, stations, origin, destination, strategy, use_cooldown)
+    rows, any_over, gtimes = [], False, {}
+    for it in range(max_iter + 1):
+        if not plan.feasible:
+            break
+        # rows / gtimes 始終對應「目前的 plan」
+        rows, any_over, gtimes = _compute_google_refinement(plan, stations, fmbc)
+        over_edges = []
+        for i, seg in enumerate(plan.segments, 1):
+            if seg.mode != "ride" or i not in gtimes:
+                continue
+            limit = fmbc.get(_seg_city(seg, stations), default_limit)
+            if gtimes[i][0] > limit:  # Google 實測 > 免費上限 → 該段要避開
+                over_edges.append(
+                    _ride_edge_key(seg.from_station_id, seg.to_station_id, use_cooldown)
+                )
+        if not over_edges or it == max_iter:
+            break  # 全部通過，或已用完重試次數（rows 對應目前 plan）
+        removed.extend(over_edges)
+        view = nx.restricted_view(graph, [], removed)
+        plan = _plan_on(view, stations, origin, destination, strategy, use_cooldown)
+
+    if plan.feasible and any_over and removed:
+        plan.message = (
+            ((plan.message + "　") if plan.message else "")
+            + "（已盡量避開 Google 實測超時的路段，但仍有路段超時，可能無完全免費的替代路線）"
+        )
+    return plan, rows, any_over, gtimes, len(removed)
+
+
+def _seg_city(seg, stations: pd.DataFrame) -> str:
+    row = stations.loc[stations["station_id"] == seg.from_station_id, "city"]
+    return row.iloc[0] if len(row) else ""
+
+
 def _compute_google_refinement(
     plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]
 ) -> tuple[list[dict], bool, dict[int, tuple[float, str]]]:
@@ -391,12 +451,6 @@ def _store_google_result(plan: RoutePlan, rows, any_over, google_times) -> None:
     sig = _route_signature(plan)
     st.session_state["google_result"] = {"sig": sig, "rows": rows, "any_over": any_over}
     st.session_state["google_times"] = {"sig": sig, "data": google_times}
-
-
-def refine_with_google(plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]) -> None:
-    """計算 Google 校正並存入 session_state（規劃完成後自動呼叫）。"""
-    rows, any_over, gt = _compute_google_refinement(plan, stations, fmbc)
-    _store_google_result(plan, rows, any_over, gt)
 
 
 def render_google_refinement(
@@ -563,13 +617,25 @@ def main() -> None:
     # 觸發 rerun 時仍能保留（否則 submit 變 False，畫面會跳回預設訊息）。
     if inp["submit"]:
         t0 = time.time()
-        if inp["use_cooldown"]:
-            plan = plan_cooldown_route(
-                graph, stations, origin, destination, strategy=inp["strategy"]
-            )
+        fmbc_now = free_minutes_by_city(list(inp["cities"]), inp["has_tpass"])
+        n_removed = 0
+        if settings.google_maps_api_key():
+            # 以 Google 實測驗證，超出免費上限的路段自動避開重規劃
+            with st.spinner("規劃並以 Google Maps 驗證各段時間（自動避開超時路段）…"):
+                plan, g_rows, g_over, g_times, n_removed = plan_with_google_validation(
+                    graph, stations, origin, destination,
+                    inp["strategy"], fmbc_now, inp["use_cooldown"],
+                )
+            if plan.feasible:
+                sig = _route_signature(plan)
+                st.session_state["google_result"] = {
+                    "sig": sig, "rows": g_rows, "any_over": g_over,
+                }
+                st.session_state["google_times"] = {"sig": sig, "data": g_times}
         else:
-            plan = plan_route(
-                graph, stations, origin, destination, strategy=inp["strategy"]
+            plan = _plan_on(
+                graph, stations, origin, destination,
+                inp["strategy"], inp["use_cooldown"],
             )
         elapsed_ms = (time.time() - t0) * 1000
         if inp["use_address"]:
@@ -578,7 +644,6 @@ def main() -> None:
         else:
             o_label = f"({origin[0]:.4f}, {origin[1]:.4f})"
             d_label = f"({destination[0]:.4f}, {destination[1]:.4f})"
-        fmbc_now = free_minutes_by_city(list(inp["cities"]), inp["has_tpass"])
         st.session_state["result"] = {
             "plan": plan,
             "origin": origin, "destination": destination,
@@ -588,11 +653,8 @@ def main() -> None:
             "stations": stations,
             "has_tpass": inp["has_tpass"],
             "elapsed_ms": elapsed_ms,
+            "n_removed": n_removed,
         }
-        # 規劃完成後，若有 Google 金鑰即自動以 Google Maps 校正各段時間
-        if plan.feasible and settings.google_maps_api_key():
-            with st.spinner("以 Google Maps 校正各段騎乘時間…"):
-                refine_with_google(plan, stations, fmbc_now)
 
     result = st.session_state.get("result")
 
@@ -616,6 +678,10 @@ def main() -> None:
         else:
             st.caption(f"規劃耗時 {result['elapsed_ms']:.0f} ms")
             render_summary(result["plan"])
+            if result.get("n_removed"):
+                st.caption(
+                    f"🛰️ 已依 Google 實測自動避開 {result['n_removed']} 段可能超時的路段。"
+                )
             _render_endpoint_diagnostic(result)
 
     if result is not None and result["plan"].feasible:

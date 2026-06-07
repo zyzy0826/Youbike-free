@@ -49,6 +49,37 @@ def _throttle() -> None:
     _last_request_ts = time.time()
 
 
+def _location_score(loc) -> float:
+    """為候選地點評分：偏好「車站/景點等實際地點」，貶抑「路線/邊界等關係」。
+
+    解決 Nominatim 對「X捷運站」常回傳整條捷運線（route relation）的問題。
+    """
+    raw = getattr(loc, "raw", None)
+    if not isinstance(raw, dict):
+        return 0.0
+    cls = str(raw.get("class", ""))
+    typ = str(raw.get("type", ""))
+    osm_type = str(raw.get("osm_type", ""))
+    score = 0.0
+    if cls in ("railway", "public_transport") and typ in (
+        "station", "stop", "halt", "stop_position", "subway_entrance"
+    ):
+        score += 6
+    if osm_type == "node":      # 點（車站/地標）通常正是使用者要的
+        score += 2
+    if cls == "place":          # 行政區 / 地名
+        score += 1
+    if cls == "route":          # 公車/捷運「路線」，幾乎不會是使用者要的點
+        score -= 6
+    if osm_type == "relation" and cls in ("route", "boundary"):
+        score -= 3
+    try:                        # importance 作為次要 tie-break
+        score += float(raw.get("importance", 0) or 0)
+    except (TypeError, ValueError):
+        pass
+    return score
+
+
 def geocode_address(
     address: str,
     country_codes: str | None = _DEFAULT_COUNTRY_CODES,
@@ -90,17 +121,20 @@ def geocode_address_verbose(
     with _lock:
         _throttle()
         try:
-            kwargs: dict = {"exactly_one": True}
+            # 取多筆候選再挑最合適者：避免「淡水捷運站」被配到「淡水信義線」整條路線
+            # （路線是 relation，質心常落在大安區）。
+            kwargs: dict = {"exactly_one": False, "limit": 10, "addressdetails": True}
             if country_codes:
                 kwargs["country_codes"] = country_codes
-            location = geocoder.geocode(query, **kwargs)
+            candidates = geocoder.geocode(query, **kwargs)
         except (GeocoderTimedOut, GeocoderServiceError) as e:
             raise GeocodeError(f"地理編碼服務錯誤：{e}") from e
 
-    if location is None:
+    if not candidates:
         raise GeocodeError(f"查無此地址：{query}")
 
-    display = getattr(location, "address", None) or query
-    result = (location.latitude, location.longitude, str(display))
+    best = max(candidates, key=_location_score)
+    display = getattr(best, "address", None) or query
+    result = (best.latitude, best.longitude, str(display))
     _cache[cache_key] = result
     return result
