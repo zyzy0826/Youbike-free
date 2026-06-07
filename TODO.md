@@ -44,7 +44,7 @@
 - [x] 顯示路線摘要卡片（4 個 metric）
 - [x] 顯示詳細行程表（含每段免費餘裕）
 - [x] @st.cache_data / cache_resource 加速重複規劃
-- [ ] 地址 → 經緯度 geocoding（geopy Nominatim，建議實際跑時加上）
+- [x] 地址 → 經緯度 geocoding（geopy Nominatim，含節流 + 快取；UI 可切換地址/經緯度輸入）
 
 ## Phase 6: 進階功能（加分項）
 - [x] 即時車輛數判斷（避免推薦無車/滿位的站）— graph build 依即時車輛數過濾邊，UI 可切換

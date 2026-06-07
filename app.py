@@ -18,6 +18,7 @@ from config import (
     ROUTE_DETOUR_FACTOR,
     SAFETY_MARGIN_MINUTES,
 )
+from core.geocoder import GeocodeError, geocode_address
 from core.graph_builder import build_station_graph
 from core.route_optimizer import RoutePlan, plan_route
 from data.fetcher import FetchError, fetch_city_stations
@@ -36,6 +37,12 @@ SUPPORTED_CITIES = [
 
 
 # ---------- 資料載入（含 Streamlit 快取） ----------
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def geocode_cached(address: str) -> tuple[float, float]:
+    """以地址查經緯度，結果快取一天（減少 Nominatim 請求）。"""
+    return geocode_address(address)
+
 
 @st.cache_data(ttl=300, show_spinner="抓取 YouBike 站點資料中…")
 def load_stations(cities: tuple[str, ...]) -> pd.DataFrame:
@@ -113,20 +120,32 @@ def render_sidebar() -> dict:
 
     st.sidebar.divider()
     st.sidebar.subheader("起點 / 終點")
-    st.sidebar.caption("直接輸入經緯度，或在主地圖上點兩下（先起點、再終點）")
 
-    o_lat = st.sidebar.number_input(
-        "起點緯度", value=25.0478, format="%.5f", key="o_lat"
+    use_address = st.sidebar.toggle(
+        "用地址 / 地標查詢", value=False,
+        help="輸入地址或地標（如「台北車站」），自動轉成經緯度（需網路）",
     )
-    o_lon = st.sidebar.number_input(
-        "起點經度", value=121.5170, format="%.5f", key="o_lon"
-    )
-    d_lat = st.sidebar.number_input(
-        "終點緯度", value=25.1677, format="%.5f", key="d_lat"
-    )
-    d_lon = st.sidebar.number_input(
-        "終點經度", value=121.4456, format="%.5f", key="d_lon"
-    )
+
+    o_addr = d_addr = ""
+    if use_address:
+        o_addr = st.sidebar.text_input("起點地址", value="台北車站")
+        d_addr = st.sidebar.text_input("終點地址", value="淡水捷運站")
+        o_lat, o_lon = 25.0478, 121.5170
+        d_lat, d_lon = 25.1677, 121.4456
+    else:
+        st.sidebar.caption("直接輸入經緯度")
+        o_lat = st.sidebar.number_input(
+            "起點緯度", value=25.0478, format="%.5f", key="o_lat"
+        )
+        o_lon = st.sidebar.number_input(
+            "起點經度", value=121.5170, format="%.5f", key="o_lon"
+        )
+        d_lat = st.sidebar.number_input(
+            "終點緯度", value=25.1677, format="%.5f", key="d_lat"
+        )
+        d_lon = st.sidebar.number_input(
+            "終點經度", value=121.4456, format="%.5f", key="d_lon"
+        )
     submit = st.sidebar.button("規劃路線", type="primary", use_container_width=True)
 
     return {
@@ -136,6 +155,9 @@ def render_sidebar() -> dict:
         "strategy": strategy,
         "allow_cross_circle": allow_cross_circle,
         "require_availability": require_availability,
+        "use_address": use_address,
+        "origin_address": o_addr,
+        "destination_address": d_addr,
         "origin": (o_lat, o_lon),
         "destination": (d_lat, d_lon),
         "submit": submit,
@@ -178,6 +200,23 @@ def render_itinerary(plan: RoutePlan, free_minutes: int) -> None:
 
 # ---------- 主流程 ----------
 
+def _resolve_addresses(
+    origin_address: str, destination_address: str
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """將起終點地址轉成經緯度。任一失敗則顯示錯誤並回傳 None。"""
+    try:
+        origin = geocode_cached(origin_address)
+        destination = geocode_cached(destination_address)
+    except GeocodeError as e:
+        st.error(f"❌ 地址解析失敗：{e}")
+        return None
+    st.caption(
+        f"📍 起點 {origin_address} → {origin[0]:.5f}, {origin[1]:.5f}；"
+        f"終點 {destination_address} → {destination[0]:.5f}, {destination[1]:.5f}"
+    )
+    return origin, destination
+
+
 def main() -> None:
     st.set_page_config(page_title="YouBike 最省錢攻略", layout="wide")
     st.title("🚲 YouBike 最省錢騎乘攻略")
@@ -202,24 +241,34 @@ def main() -> None:
 
     st.caption(f"已載入 {len(stations)} 站、{graph.number_of_edges()} 條邊")
 
+    origin = inp["origin"]
+    destination = inp["destination"]
+    if inp["use_address"]:
+        resolved = _resolve_addresses(
+            inp["origin_address"], inp["destination_address"]
+        )
+        if resolved is None:
+            return
+        origin, destination = resolved
+
     plan: RoutePlan | None = None
     if inp["submit"]:
         t0 = time.time()
         plan = plan_route(
             graph, stations,
-            inp["origin"], inp["destination"],
+            origin, destination,
             strategy=inp["strategy"],
         )
         st.caption(f"規劃耗時 {(time.time() - t0) * 1000:.0f} ms")
 
     # 地圖
     center = (
-        (inp["origin"][0] + inp["destination"][0]) / 2,
-        (inp["origin"][1] + inp["destination"][1]) / 2,
+        (origin[0] + destination[0]) / 2,
+        (origin[1] + destination[1]) / 2,
     )
     m = render_base_map(stations, center=center, zoom_start=12)
     if plan is not None:
-        m = draw_route(m, plan, stations, inp["origin"], inp["destination"])
+        m = draw_route(m, plan, stations, origin, destination)
 
     map_col, info_col = st.columns([2, 1])
     with map_col:
