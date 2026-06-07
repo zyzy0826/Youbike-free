@@ -10,10 +10,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 
 from config import CROSS_CIRCLE_FEE_NTD
-from core.time_estimator import estimate_walking_time, haversine_km
+from core.time_estimator import estimate_walking_time
+
+_EARTH_RADIUS_KM = 6371.0088
 
 
 Strategy = Literal["fewest_swaps", "shortest_time"]
@@ -45,17 +48,35 @@ class RoutePlan:
     message: str = ""
 
 
+def _haversine_km_vec(
+    lat: float, lon: float, lats: np.ndarray, lons: np.ndarray
+) -> np.ndarray:
+    """向量化 haversine：單點對多點，回傳距離（公里）陣列。"""
+    rlat1 = np.radians(lat)
+    rlats = np.radians(lats)
+    dlat = np.radians(lats - lat)
+    dlon = np.radians(lons - lon)
+    a = (
+        np.sin(dlat / 2) ** 2
+        + np.cos(rlat1) * np.cos(rlats) * np.sin(dlon / 2) ** 2
+    )
+    return 2 * _EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
+
+
 def find_nearest_station(
     lat: float, lon: float, stations: pd.DataFrame
 ) -> tuple[str, float]:
-    """找出距離指定座標最近的站點，回傳 (station_id, 距離公里)。"""
+    """找出距離指定座標最近的站點，回傳 (station_id, 距離公里)。
+
+    以向量化 haversine 一次算完所有站點距離，較逐站 Python 迴圈快很多。
+    """
     if stations.empty:
         raise ValueError("stations DataFrame 為空")
     lats = stations["lat"].to_numpy(dtype=float)
     lons = stations["lon"].to_numpy(dtype=float)
-    dists = [haversine_km(lat, lon, la, lo) for la, lo in zip(lats, lons)]
-    idx = min(range(len(dists)), key=dists.__getitem__)
-    return str(stations.iloc[idx]["station_id"]), dists[idx]
+    dists = _haversine_km_vec(lat, lon, lats, lons)
+    idx = int(np.argmin(dists))
+    return str(stations.iloc[idx]["station_id"]), float(dists[idx])
 
 
 def _build_segments(

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import pandas as pd
 
+import pytest
+
 from core.graph_builder import build_station_graph
 from core.route_optimizer import find_nearest_station, plan_route
+from core.time_estimator import haversine_km
 
 
 def _make_stations(rows):
@@ -41,6 +44,19 @@ def test_find_nearest_station():
     sid, dist = find_nearest_station(25.0, 121.5 + DEG_PER_KM * 0.1, STATIONS)
     assert sid == "A"
     assert dist < 0.2
+
+
+def test_find_nearest_station_matches_scalar_haversine():
+    # 向量化結果應與逐站 scalar haversine 一致
+    qlat, qlon = 25.0, 121.5 + DEG_PER_KM * 2.4  # 介於 C、D 之間，偏 C
+    sid, dist = find_nearest_station(qlat, qlon, STATIONS)
+    expected = min(
+        ((r.station_id, haversine_km(qlat, qlon, r.lat, r.lon))
+         for r in STATIONS.itertuples()),
+        key=lambda t: t[1],
+    )
+    assert sid == expected[0]
+    assert dist == pytest.approx(expected[1])
 
 
 def test_direct_route_when_within_free_time():
