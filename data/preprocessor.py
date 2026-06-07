@@ -34,9 +34,9 @@ FIELD_MAP: dict[str, list[str]] = {
     "name": ["sna", "StationName", "station_name"],
     "lat": ["latitude", "lat", "Latitude"],
     "lon": ["longitude", "lng", "Longitude"],
-    "total": ["Quantity", "tot", "total"],
-    "available_bikes": ["available_rent_bikes", "sbi", "AvailableRentBikes"],
-    "available_docks": ["available_return_bikes", "bemp", "AvailableReturnBikes"],
+    "total": ["Quantity", "tot_quantity", "tot", "total"],
+    "available_bikes": ["available_rent_bikes", "sbi_quantity", "sbi", "AvailableRentBikes"],
+    "available_docks": ["available_return_bikes", "bemp_quantity", "bemp", "AvailableReturnBikes"],
     "updated_at": ["srcUpdateTime", "updateTime", "mday"],
     "active": ["act", "Status", "status"],
 }
