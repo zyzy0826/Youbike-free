@@ -53,7 +53,7 @@
   - [x] config 標註接入方式（data_path / verify_ssl 說明）
   - [] 填入桃園、高雄實際 API URL（沙箱無網路，待有網路時尋找並驗證端點）
 - [x] 跨縣市路線規劃（同生活圈如台北↔新北自動連邊；跨生活圈以 allow_cross_circle 開關 + 調度費警示）
-      — 仍待補：跨城市不同免費時間規則的逐段上限（目前用單一 free_minutes）
+      — 逐段免費上限已改為依起站縣市 + 是否持 TPASS（見 Phase 7）
 - [~] 同站續借冷卻時間處理（實測約需等待 10–15 分鐘才能再借同一站）
   - [ ] 演算法：加入「步行至鄰近站借車」邊（步行 2–3 分鐘、200–300m 內）
         — 需 node-split 模型才能正確計入冷卻成本，留待較大重構
@@ -61,3 +61,11 @@
   - [ ] 對應 GitHub issue：同站換車冷卻時間（10–15 分鐘）
 - [x] 效能優化：最近站搜尋向量化（numpy 一次算完所有站距，取代逐站 Python 迴圈；環境無 scipy/sklearn，KD-Tree 待加裝後再評估）
 - [ ] 部署到 Streamlit Cloud
+
+## Phase 7: 真實時間、兩 case 免費、.env 與 AI 回饋
+- [x] .env 載入（零相依解析）+ settings：集中管理 API 金鑰（.env 已在 .gitignore，附 .env.example）
+- [x] 兩 case 免費騎乘時長：依「起站縣市 + 是否持 TPASS」決定逐段免費上限（聚焦北北桃）
+- [x] Google Maps 騎乘時間校正：bicycling → driving 道路距離換算 → haversine 回退；UI 逐段比較並警示超時
+- [x] AI 行程回饋：客觀事實收集 → Gemini 語氣潤飾（無金鑰自動回退本地模板摘要）
+- [ ] Google bicycling 在台灣的實際支援狀況待有網路時驗證（目前已備妥 driving 距離回退）
+- [ ] AI 回饋可加入即時車況 / Google 校正結果作為事實來源

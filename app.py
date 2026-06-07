@@ -20,6 +20,7 @@ from config import (
     free_minutes_by_city,
 )
 from config import settings
+from core.feedback import collect_facts, generate_feedback
 from core.geocoder import GeocodeError, geocode_address
 from core.gmaps import GMapsError, get_travel_time
 from core.graph_builder import build_station_graph
@@ -303,6 +304,38 @@ def render_google_refinement(
         st.success("✅ 依 Google 校正，各路段仍在免費上限內。")
 
 
+def render_ai_feedback(
+    plan: RoutePlan,
+    fmbc: dict[str, int],
+    id_to_city: dict[str, str],
+    origin_label: str,
+    destination_label: str,
+    has_tpass: bool,
+) -> None:
+    """產生 AI 行程建議：客觀事實由程式計算，Gemini 僅負責語氣潤飾。"""
+    st.subheader("✨ AI 行程建議")
+    facts = collect_facts(
+        plan, fmbc, id_to_city,
+        origin_label=origin_label, destination_label=destination_label,
+        has_tpass=has_tpass,
+    )
+    api_key = settings.gemini_api_key()
+    if not api_key:
+        st.caption("（選用）在 .env 設定 GEMINI_API_KEY 後，AI 會把以下事實潤飾成親切建議。")
+
+    if st.button("產生建議", key="ai_feedback_btn"):
+        with st.spinner("整理建議中…"):
+            text, source = generate_feedback(facts, api_key, settings.gemini_model())
+        if source == "gemini":
+            st.markdown(text)
+            st.caption("由 Gemini 依客觀事實潤飾生成。")
+        else:
+            # 無金鑰或呼叫失敗 → 顯示本地事實摘要
+            st.text(text)
+            if api_key:
+                st.caption("Gemini 呼叫未成功，已改顯示本地事實摘要。")
+
+
 # ---------- 主流程 ----------
 
 def _resolve_addresses(
@@ -391,6 +424,16 @@ def main() -> None:
         render_itinerary(plan, fmbc, id_to_city)
         render_google_refinement(plan, stations, fmbc)
         render_cooldown_advice(plan)
+
+        if inp["use_address"]:
+            o_label = inp["origin_address"] or "起點"
+            d_label = inp["destination_address"] or "終點"
+        else:
+            o_label = f"({origin[0]:.4f}, {origin[1]:.4f})"
+            d_label = f"({destination[0]:.4f}, {destination[1]:.4f})"
+        render_ai_feedback(
+            plan, fmbc, id_to_city, o_label, d_label, inp["has_tpass"]
+        )
 
 
 if __name__ == "__main__":
