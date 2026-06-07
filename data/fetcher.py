@@ -10,8 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import requests
+import urllib3
 
 from config import CITY_CONFIG
+
+# 部分政府開放資料 API 的憑證有瑕疵（例如新北市 data.ntpc.gov.tw 缺 Subject Key
+# Identifier），對應 city 會以 verify_ssl=False 連線。抑制相關警告以保持 CLI 乾淨。
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CACHE_DIR = Path(__file__).parent / "cache"
 DEFAULT_CACHE_TTL_SECONDS = 300  # 5 分鐘
@@ -41,9 +46,11 @@ def fetch_city_stations(
     """
     if city not in CITY_CONFIG:
         raise ValueError(f"未知縣市: {city}")
-    api_url = CITY_CONFIG[city]["api_url"]
+    cfg = CITY_CONFIG[city]
+    api_url = cfg["api_url"]
     if not api_url or api_url.startswith("TODO"):
         raise FetchError(f"{city} 的 API URL 尚未設定")
+    verify_ssl = cfg.get("verify_ssl", True)
 
     base = cache_dir or CACHE_DIR
 
@@ -53,7 +60,7 @@ def fetch_city_stations(
             return cached
 
     try:
-        resp = requests.get(api_url, timeout=REQUEST_TIMEOUT)
+        resp = requests.get(api_url, timeout=REQUEST_TIMEOUT, verify=verify_ssl)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as e:

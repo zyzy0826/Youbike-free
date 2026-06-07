@@ -12,6 +12,7 @@ CITY_CONFIG = {
         "free_minutes": 30,
         "eligibility": "會員即享",
         "api_url": "https://data.ntpc.gov.tw/api/datasets/010e5b15-3823-4b20-b401-b1cf000550c5/json?size=2000",
+        "verify_ssl": False,  # NTPC 憑證缺 Subject Key Identifier，新版 Python ssl 驗證會失敗
         "living_circle": "北北桃",
         "note": "2025/3/1 起前 30 分鐘免費",
     },
