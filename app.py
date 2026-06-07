@@ -318,52 +318,57 @@ def render_google_refinement(
     if not settings.google_maps_api_key():
         st.info("（選用）在 .env 設定 GOOGLE_MAPS_API_KEY 後，可用 Google 校正真實道路時間。")
         return
-    if not st.button("🛰️ 用 Google Maps 校正騎乘時間"):
-        return
 
-    coords = stations.set_index("station_id")[["lat", "lon", "city"]].to_dict("index")
-    rows = []
-    any_over = False
-    google_times: dict[int, tuple[float, str]] = {}
-    with st.spinner("查詢 Google Maps 中…"):
-        for i, seg in enumerate(plan.segments, 1):
-            if seg.mode != "ride":
-                continue  # 步行 / 等冷卻段不需 Google 校正
-            a = coords[seg.from_station_id]
-            b = coords[seg.to_station_id]
-            limit = fmbc.get(a["city"], max(fmbc.values()) if fmbc else 30)
-            try:
-                g_min, g_km, mode = gmaps_travel_cached(
-                    a["lat"], a["lon"], b["lat"], b["lon"]
-                )
-                over = g_min > limit
-                any_over = any_over or over
-                google_times[i] = (g_min, mode)
-                rows.append({
-                    "段": i, "起站": seg.from_name, "終站": seg.to_name,
-                    "估算 (分)": round(seg.minutes, 1),
-                    # 字串呈現，與失敗列的 "—" 同型，避免 Arrow 混型序列化失敗
-                    "Google (分)": f"{g_min:.1f}",
-                    "Google 模式": mode,
-                    "免費上限 (分)": limit,
-                    "超時": "⚠️" if over else "",
-                })
-            except GMapsError as e:
-                rows.append({
-                    "段": i, "起站": seg.from_name, "終站": seg.to_name,
-                    "估算 (分)": round(seg.minutes, 1),
-                    "Google (分)": "—", "Google 模式": f"失敗：{e}",
-                    "免費上限 (分)": limit, "超時": "",
-                })
-    # 存入 session_state，讓「AI 行程建議」可把 Google 校正結果也納入事實
-    st.session_state["google_times"] = {
-        "sig": _route_signature(plan), "data": google_times,
-    }
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    if any_over:
-        st.warning("⚠️ 依 Google 校正，部分路段實際時間超過免費上限，該段可能產生費用。")
-    else:
-        st.success("✅ 依 Google 校正，各路段仍在免費上限內。")
+    sig = _route_signature(plan)
+    if st.button("🛰️ 用 Google Maps 校正騎乘時間"):
+        coords = stations.set_index("station_id")[["lat", "lon", "city"]].to_dict("index")
+        rows = []
+        any_over = False
+        google_times: dict[int, tuple[float, str]] = {}
+        with st.spinner("查詢 Google Maps 中…"):
+            for i, seg in enumerate(plan.segments, 1):
+                if seg.mode != "ride":
+                    continue  # 步行 / 等冷卻段不需 Google 校正
+                a = coords[seg.from_station_id]
+                b = coords[seg.to_station_id]
+                limit = fmbc.get(a["city"], max(fmbc.values()) if fmbc else 30)
+                try:
+                    g_min, g_km, mode = gmaps_travel_cached(
+                        a["lat"], a["lon"], b["lat"], b["lon"]
+                    )
+                    over = g_min > limit
+                    any_over = any_over or over
+                    google_times[i] = (g_min, mode)
+                    rows.append({
+                        "段": i, "起站": seg.from_name, "終站": seg.to_name,
+                        "估算 (分)": round(seg.minutes, 1),
+                        # 字串呈現，與失敗列的 "—" 同型，避免 Arrow 混型序列化失敗
+                        "Google (分)": f"{g_min:.1f}",
+                        "Google 模式": mode,
+                        "免費上限 (分)": limit,
+                        "超時": "⚠️" if over else "",
+                    })
+                except GMapsError as e:
+                    rows.append({
+                        "段": i, "起站": seg.from_name, "終站": seg.to_name,
+                        "估算 (分)": round(seg.minutes, 1),
+                        "Google (分)": "—", "Google 模式": f"失敗：{e}",
+                        "免費上限 (分)": limit, "超時": "",
+                    })
+        # 存入 session_state，讓表格與「AI 行程建議」跨 rerun 都能取用
+        st.session_state["google_result"] = {
+            "sig": sig, "rows": rows, "any_over": any_over,
+        }
+        st.session_state["google_times"] = {"sig": sig, "data": google_times}
+
+    # 顯示（含先前已校正的結果，只要仍對應同一路線）
+    gr = st.session_state.get("google_result")
+    if gr and gr["sig"] == sig:
+        st.dataframe(pd.DataFrame(gr["rows"]), hide_index=True, width="stretch")
+        if gr["any_over"]:
+            st.warning("⚠️ 依 Google 校正，部分路段實際時間超過免費上限，該段可能產生費用。")
+        else:
+            st.success("✅ 依 Google 校正，各路段仍在免費上限內。")
 
 
 def render_ai_feedback(
@@ -402,15 +407,20 @@ def render_ai_feedback(
     if google_times:
         st.caption("已納入 Google 校正時間作為事實來源。")
 
+    sig = _route_signature(plan)
     if st.button("產生建議", key="ai_feedback_btn"):
         with st.spinner("整理建議中…"):
             text, source = generate_feedback(facts, api_key, settings.gemini_model())
-        if source == "gemini":
-            st.markdown(text)
+        st.session_state["ai_result"] = {"sig": sig, "text": text, "source": source}
+
+    # 顯示（含先前已產生的建議，只要仍對應同一路線）
+    ar = st.session_state.get("ai_result")
+    if ar and ar["sig"] == sig:
+        if ar["source"] == "gemini":
+            st.markdown(ar["text"])
             st.caption("由 Gemini 依客觀事實潤飾生成。")
         else:
-            # 無金鑰或呼叫失敗 → 顯示本地事實摘要
-            st.text(text)
+            st.text(ar["text"])
             if api_key:
                 st.caption("Gemini 呼叫未成功，已改顯示本地事實摘要。")
 
@@ -470,7 +480,8 @@ def main() -> None:
             return
         origin, destination = resolved
 
-    plan: RoutePlan | None = None
+    # 只有按下「規劃路線」才重算；結果存入 session_state，後續按 Google / AI 等按鈕
+    # 觸發 rerun 時仍能保留（否則 submit 變 False，畫面會跳回預設訊息）。
     if inp["submit"]:
         t0 = time.time()
         if inp["use_cooldown"]:
@@ -481,42 +492,56 @@ def main() -> None:
             plan = plan_route(
                 graph, stations, origin, destination, strategy=inp["strategy"]
             )
-        st.caption(f"規劃耗時 {(time.time() - t0) * 1000:.0f} ms")
-
-    # 地圖
-    center = (
-        (origin[0] + destination[0]) / 2,
-        (origin[1] + destination[1]) / 2,
-    )
-    m = render_base_map(stations, center=center, zoom_start=12)
-    if plan is not None:
-        m = draw_route(m, plan, stations, origin, destination)
-
-    map_col, info_col = st.columns([2, 1])
-    with map_col:
-        st_folium(m, width=None, height=620, returned_objects=[])
-    with info_col:
-        if plan is None:
-            st.info("設定好起終點後，按側欄的「規劃路線」開始。")
-        else:
-            render_summary(plan)
-
-    if plan is not None and plan.feasible:
-        st.subheader("詳細行程")
-        fmbc = free_minutes_by_city(list(inp["cities"]), inp["has_tpass"])
-        id_to_city = dict(zip(stations["station_id"], stations["city"]))
-        render_itinerary(plan, fmbc, id_to_city)
-        render_google_refinement(plan, stations, fmbc)
-        render_cooldown_advice(plan)
-
+        elapsed_ms = (time.time() - t0) * 1000
         if inp["use_address"]:
             o_label = inp["origin_address"] or "起點"
             d_label = inp["destination_address"] or "終點"
         else:
             o_label = f"({origin[0]:.4f}, {origin[1]:.4f})"
             d_label = f"({destination[0]:.4f}, {destination[1]:.4f})"
+        st.session_state["result"] = {
+            "plan": plan,
+            "origin": origin, "destination": destination,
+            "o_label": o_label, "d_label": d_label,
+            "fmbc": free_minutes_by_city(list(inp["cities"]), inp["has_tpass"]),
+            "id_to_city": dict(zip(stations["station_id"], stations["city"])),
+            "stations": stations,
+            "has_tpass": inp["has_tpass"],
+            "elapsed_ms": elapsed_ms,
+        }
+
+    result = st.session_state.get("result")
+
+    # 地圖
+    if result is not None:
+        r_o, r_d, r_st = result["origin"], result["destination"], result["stations"]
+        center = ((r_o[0] + r_d[0]) / 2, (r_o[1] + r_d[1]) / 2)
+        m = render_base_map(r_st, center=center, zoom_start=12)
+        m = draw_route(m, result["plan"], r_st, r_o, r_d)
+    else:
+        center = ((origin[0] + destination[0]) / 2,
+                  (origin[1] + destination[1]) / 2)
+        m = render_base_map(stations, center=center, zoom_start=12)
+
+    map_col, info_col = st.columns([2, 1])
+    with map_col:
+        st_folium(m, width=None, height=620, returned_objects=[])
+    with info_col:
+        if result is None:
+            st.info("設定好起終點後，按側欄的「規劃路線」開始。")
+        else:
+            st.caption(f"規劃耗時 {result['elapsed_ms']:.0f} ms")
+            render_summary(result["plan"])
+
+    if result is not None and result["plan"].feasible:
+        st.subheader("詳細行程")
+        render_itinerary(result["plan"], result["fmbc"], result["id_to_city"])
+        render_google_refinement(result["plan"], result["stations"], result["fmbc"])
+        render_cooldown_advice(result["plan"])
         render_ai_feedback(
-            plan, stations, fmbc, id_to_city, o_label, d_label, inp["has_tpass"]
+            result["plan"], result["stations"], result["fmbc"],
+            result["id_to_city"], result["o_label"], result["d_label"],
+            result["has_tpass"],
         )
 
 
