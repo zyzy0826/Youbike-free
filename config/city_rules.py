@@ -4,7 +4,7 @@ CITY_CONFIG = {
     "台北市": {
         "free_minutes": 30,
         "eligibility": "會員即享",
-        "api_url": "https://tcgbikes.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json",
+        "api_url": "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json",
         "living_circle": "北北桃",
         "note": "2024/2/28 起前 30 分鐘免費（市府補助 10 元）",
     },
