@@ -1,16 +1,28 @@
 """設定模組：各縣市規則與騎乘參數。"""
 from .city_rules import (
+    ACTIVE_CIRCLE,
     CITY_CONFIG,
     LIVING_CIRCLES,
+    CROSS_CIRCLE_FEE_NTD,
     DEFAULT_CYCLING_SPEED_KMH,
     ROUTE_DETOUR_FACTOR,
     SAFETY_MARGIN_MINUTES,
+    active_cities,
+    city_to_circle,
+    free_minutes_by_city,
+    free_minutes_for,
 )
 
 __all__ = [
+    "ACTIVE_CIRCLE",
     "CITY_CONFIG",
     "LIVING_CIRCLES",
+    "CROSS_CIRCLE_FEE_NTD",
     "DEFAULT_CYCLING_SPEED_KMH",
     "ROUTE_DETOUR_FACTOR",
     "SAFETY_MARGIN_MINUTES",
+    "active_cities",
+    "city_to_circle",
+    "free_minutes_by_city",
+    "free_minutes_for",
 ]
