@@ -39,6 +39,12 @@ class RouteFacts:
     tight_segments: list[dict] = field(default_factory=list)  # 免費餘裕偏少的路段
     cooldown_swaps: list[dict] = field(default_factory=list)
     warning: str = ""
+    # 即時車況（若有提供 availability）
+    start_station: str = ""
+    start_bikes: int | None = None
+    end_station: str = ""
+    end_docks: int | None = None
+    availability_warnings: list[str] = field(default_factory=list)
 
 
 def collect_facts(
@@ -49,9 +55,16 @@ def collect_facts(
     destination_label: str = "終點",
     has_tpass: bool = False,
     tight_margin_min: float = 5.0,
+    availability: dict[str, tuple[int, int]] | None = None,
 ) -> RouteFacts:
-    """從 RoutePlan 計算客觀事實。免費規則以各段起站縣市為準。"""
+    """從 RoutePlan 計算客觀事實。免費規則以各段起站縣市為準。
+
+    Args:
+        availability: {station_id: (可借車輛數, 可還空位數)} 即時車況；提供時會把
+            起點借車站、終點還車站、換車點的即時車況納入事實並產生缺車/滿位警示。
+    """
     default_limit = max(fmbc.values()) if fmbc else 30
+    avail = availability or {}
     segments: list[dict] = []
     tight: list[dict] = []
     for i, seg in enumerate(plan.segments, 1):
@@ -71,15 +84,39 @@ def collect_facts(
         if margin < tight_margin_min:
             tight.append(info)
 
-    cooldown = [
-        {
+    cooldown = []
+    for adv in plan.swap_advice:
+        bikes, docks = avail.get(adv.station_id, (None, None))
+        cooldown.append({
             "station": adv.station_name,
             "has_alternative": bool(adv.alternatives),
             "nearest_alt": adv.alternatives[0][0] if adv.alternatives else None,
             "nearest_alt_walk_min": round(adv.alternatives[0][1], 1) if adv.alternatives else None,
-        }
-        for adv in plan.swap_advice
-    ]
+            "current_bikes": bikes,
+            "current_docks": docks,
+        })
+
+    # 即時車況：起點借車站需有車、終點還車站需有位
+    start_station = end_station = ""
+    start_bikes = end_docks = None
+    avail_warnings: list[str] = []
+    if plan.segments:
+        start_id = plan.segments[0].from_station_id
+        start_station = plan.segments[0].from_name
+        end_id = plan.segments[-1].to_station_id
+        end_station = plan.segments[-1].to_name
+        if start_id in avail:
+            start_bikes = avail[start_id][0]
+            if start_bikes == 0:
+                avail_warnings.append(
+                    f"起點借車站「{start_station}」目前無車可借，出發前請確認或改鄰站借車。"
+                )
+        if end_id in avail:
+            end_docks = avail[end_id][1]
+            if end_docks == 0:
+                avail_warnings.append(
+                    f"終點還車站「{end_station}」目前無空位可還，抵達前請確認或改鄰站還車。"
+                )
 
     total_with_walk = plan.total_minutes + plan.walk_to_start_min + plan.walk_from_end_min
     return RouteFacts(
@@ -95,6 +132,11 @@ def collect_facts(
         tight_segments=tight,
         cooldown_swaps=cooldown,
         warning=plan.message,
+        start_station=start_station,
+        start_bikes=start_bikes,
+        end_station=end_station,
+        end_docks=end_docks,
+        availability_warnings=avail_warnings,
     )
 
 
@@ -114,19 +156,28 @@ def facts_to_text(facts: RouteFacts) -> str:
             f"  第{s['index']}段 {s['from']}→{s['to']}（{s['city']}）"
             f"：騎乘 {s['minutes']} 分，免費上限 {s['free_limit']} 分，餘裕 {s['margin']} 分"
         )
+    if facts.start_bikes is not None:
+        lines.append(f"起點借車站「{facts.start_station}」目前可借車輛：{facts.start_bikes} 台")
+    if facts.end_docks is not None:
+        lines.append(f"終點還車站「{facts.end_station}」目前可還空位：{facts.end_docks} 位")
     if facts.tight_segments:
         names = "、".join(f"第{s['index']}段" for s in facts.tight_segments)
         lines.append(f"免費餘裕偏少（<5 分）的路段：{names}，建議加快或提前還車。")
+    for w in facts.availability_warnings:
+        lines.append(f"即時車況提醒：{w}")
     if facts.cooldown_swaps:
         for c in facts.cooldown_swaps:
+            cond = ""
+            if c.get("current_docks") is not None:
+                cond = f"（該站目前可還 {c['current_docks']} 位、可借 {c['current_bikes']} 台）"
             if c["has_alternative"]:
                 lines.append(
-                    f"換車點 {c['station']} 有同站續借冷卻，建議改到步行約 "
+                    f"換車點 {c['station']}{cond} 有同站續借冷卻，建議改到步行約 "
                     f"{c['nearest_alt_walk_min']} 分的「{c['nearest_alt']}」借車。"
                 )
             else:
                 lines.append(
-                    f"換車點 {c['station']} 附近無其他可借站，需於原站等候冷卻或改用雙卡。"
+                    f"換車點 {c['station']}{cond} 附近無其他可借站，需於原站等候冷卻或改用雙卡。"
                 )
     if facts.warning:
         lines.append(f"注意：{facts.warning}")

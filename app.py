@@ -306,6 +306,7 @@ def render_google_refinement(
 
 def render_ai_feedback(
     plan: RoutePlan,
+    stations: pd.DataFrame,
     fmbc: dict[str, int],
     id_to_city: dict[str, str],
     origin_label: str,
@@ -314,10 +315,18 @@ def render_ai_feedback(
 ) -> None:
     """產生 AI 行程建議：客觀事實由程式計算，Gemini 僅負責語氣潤飾。"""
     st.subheader("✨ AI 行程建議")
+    availability = {
+        sid: (int(b or 0), int(d or 0))
+        for sid, b, d in zip(
+            stations["station_id"],
+            stations["available_bikes"],
+            stations["available_docks"],
+        )
+    }
     facts = collect_facts(
         plan, fmbc, id_to_city,
         origin_label=origin_label, destination_label=destination_label,
-        has_tpass=has_tpass,
+        has_tpass=has_tpass, availability=availability,
     )
     api_key = settings.gemini_api_key()
     if not api_key:
@@ -432,7 +441,7 @@ def main() -> None:
             o_label = f"({origin[0]:.4f}, {origin[1]:.4f})"
             d_label = f"({destination[0]:.4f}, {destination[1]:.4f})"
         render_ai_feedback(
-            plan, fmbc, id_to_city, o_label, d_label, inp["has_tpass"]
+            plan, stations, fmbc, id_to_city, o_label, d_label, inp["has_tpass"]
         )
 
 

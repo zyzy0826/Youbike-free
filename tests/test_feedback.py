@@ -61,6 +61,32 @@ def test_facts_to_text_contains_key_numbers():
     assert "鄰站" in text  # 冷卻改借建議
 
 
+def test_collect_facts_includes_realtime_availability():
+    # 起點站 0 車、終點站 0 位 → 應產生車況警示
+    avail = {
+        "台北市_1": (0, 5),   # 起點借車站：0 車可借
+        "台北市_2": (3, 2),   # 換車點
+        "桃園市_4": (4, 0),   # 終點還車站：0 位可還
+    }
+    facts = collect_facts(_plan(), _FMBC, _ID2CITY, availability=avail)
+    assert facts.start_bikes == 0
+    assert facts.end_docks == 0
+    assert len(facts.availability_warnings) == 2
+    # 換車點即時車況併入冷卻事實
+    assert facts.cooldown_swaps[0]["current_docks"] == 2
+    assert facts.cooldown_swaps[0]["current_bikes"] == 3
+    text = facts_to_text(facts)
+    assert "目前無車可借" in text
+    assert "目前無空位可還" in text
+
+
+def test_collect_facts_without_availability_has_no_warnings():
+    facts = collect_facts(_plan(), _FMBC, _ID2CITY)
+    assert facts.start_bikes is None
+    assert facts.end_docks is None
+    assert facts.availability_warnings == []
+
+
 def test_generate_feedback_without_key_uses_template():
     text, source = generate_feedback(collect_facts(_plan(), _FMBC, _ID2CITY), api_key=None)
     assert source == "template"

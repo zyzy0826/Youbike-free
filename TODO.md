@@ -68,4 +68,5 @@
 - [x] Google Maps 騎乘時間校正：bicycling → driving 道路距離換算 → haversine 回退；UI 逐段比較並警示超時
 - [x] AI 行程回饋：客觀事實收集 → Gemini 語氣潤飾（無金鑰自動回退本地模板摘要）
 - [ ] Google bicycling 在台灣的實際支援狀況待有網路時驗證（目前已備妥 driving 距離回退）
-- [ ] AI 回饋可加入即時車況 / Google 校正結果作為事實來源
+- [x] AI 回饋納入即時車況作為事實：起點借車站缺車、終點還車站滿位、換車點即時車況皆併入並產生警示
+- [ ] AI 回饋進一步納入 Google 校正結果作為事實來源
