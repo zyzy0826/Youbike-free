@@ -6,4 +6,5 @@ data/cache/*.json
 .venv/
 venv/
 .env
+.streamlit/secrets.toml
 route_preview.html

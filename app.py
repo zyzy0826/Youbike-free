@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 import time
 
 import networkx as nx
@@ -41,6 +42,20 @@ from visualization.map_renderer import draw_route, render_base_map
 
 # 目前聚焦北北桃生活圈（其餘縣市暫不在主流程支援）。
 SUPPORTED_CITIES = active_cities()
+
+# Streamlit Cloud 以 st.secrets 提供金鑰，但 config.settings 讀的是環境變數，
+# 故啟動時把 secrets 橋接到 os.environ（本機若用 .env 則此處通常為空，不受影響）。
+_SECRET_KEYS = ("GOOGLE_MAPS_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL")
+
+
+def _bridge_secrets_to_env() -> None:
+    for key in _SECRET_KEYS:
+        try:
+            val = st.secrets[key]  # 無 secrets 檔時會丟例外
+        except Exception:
+            continue
+        if val:
+            os.environ.setdefault(key, str(val))
 
 
 # ---------- 資料載入（含 Streamlit 快取） ----------
@@ -407,6 +422,7 @@ def _resolve_addresses(
 
 
 def main() -> None:
+    _bridge_secrets_to_env()
     st.set_page_config(page_title="YouBike 最省錢攻略", layout="wide")
     st.title("🚲 YouBike 最省錢騎乘攻略")
     st.caption("自動規劃中途換車路線，全程免費抵達目的地")

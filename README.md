@@ -102,6 +102,12 @@ python scripts/smoke_plan_route.py    # 台北車站 → 淡水捷運站
 python scripts/smoke_render_map.py    # 產出 route_preview.html
 ```
 
+## 部署
+
+部署到 Streamlit Community Cloud 的完整步驟（含 Secrets 設定）見 [DEPLOY.md](DEPLOY.md)。
+`.streamlit/config.toml` 為主題與伺服器設定；金鑰透過 Streamlit Secrets 提供，
+啟動時會自動橋接到環境變數。
+
 ## 開發進度
 
 詳細待辦事項見 [TODO.md](TODO.md)。

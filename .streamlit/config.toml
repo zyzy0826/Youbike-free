@@ -1,0 +1,17 @@
+# Streamlit 設定（本機開發與 Streamlit Cloud 共用）
+# 文件：https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+
+[theme]
+base = "light"
+primaryColor = "#2e8b57"          # YouBike 綠
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f3f6f4"
+font = "sans serif"
+
+[server]
+headless = true                    # 雲端與 CI 不嘗試開啟瀏覽器
+enableXsrfProtection = true
+maxUploadSize = 5                  # 本專案不需大檔上傳，調小以省資源
+
+[browser]
+gatherUsageStats = false

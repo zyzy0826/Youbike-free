@@ -60,7 +60,7 @@
   - [x] UI 提示：每個換車點顯示冷卻警示，並列出 300m 內有車可改借的鄰站（一般模式）
   - [ ] 對應 GitHub issue：同站換車冷卻時間（10–15 分鐘）
 - [x] 效能優化：最近站搜尋向量化（numpy 一次算完所有站距，取代逐站 Python 迴圈；環境無 scipy/sklearn，KD-Tree 待加裝後再評估）
-- [ ] 部署到 Streamlit Cloud
+- [x] 部署到 Streamlit Cloud：備妥 .streamlit/config.toml、secrets 範本與 st.secrets→env 橋接、DEPLOY.md 指南（實際按部署鈕需你的帳號）
 
 ## Phase 7: 真實時間、兩 case 免費、.env 與 AI 回饋
 - [x] .env 載入（零相依解析）+ settings：集中管理 API 金鑰（.env 已在 .gitignore，附 .env.example）
