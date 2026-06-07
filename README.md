@@ -20,8 +20,9 @@ YouBike 對較長距離的單趟騎乘會開始收費。但只要在免費時間
 - **兩 case 免費時長**：依「**起站縣市 + 是否持 TPASS 月票**」逐段判斷免費上限。
   跨縣市路線（如桃園↔台北）每一段各自套用其借車地的規則
 - **即時車況過濾**：可選擇只規劃「有車可借／有位可還」的站，避免推薦到空站或滿站
-- **同站續借冷卻提醒**：換車點還車後於同站再借需等 10~15 分鐘冷卻；系統會列出
-  300m 內有車可改借的鄰站與步行時間
+- **同站續借冷卻處理**：換車點還車後於同站再借需等 10~15 分鐘冷卻。一般模式會列出
+  300m 內有車可改借的鄰站；另提供 opt-in 的 **node-split 冷卻模型**，把「步行到鄰站
+  借車」與「原站等冷卻」建模成可被最佳化的路段，地圖以虛線 / 時鐘標示
 - **地址 / 地標查詢**：可直接輸入「台北車站」「淡水捷運站」等，自動轉成經緯度
   （geopy Nominatim，含節流與快取）
 - **Google Maps 時間校正**（選用）：以真實道路距離校正各段騎乘時間，並標示是否
@@ -42,11 +43,12 @@ data/             API 擷取（含巢狀格式容錯）+ 欄位正規化
 core/
   graph_builder.py   站點圖建構（逐段依借車地縣市套用免費上限）
   route_optimizer.py BFS / Dijkstra 路徑演算法 + 冷卻改借建議
+  cooldown.py        node-split 冷卻模型（borrow/return 節點 + walk/wait 邊）
   geocoder.py        地址 → 經緯度（Nominatim）
   gmaps.py           Google Maps 道路時間校正（含回退）
   feedback.py        AI 回饋：事實收集 + Gemini 語氣潤飾
 visualization/    Folium 地圖渲染
-tests/            pytest 單元測試（目前 63 passed）
+tests/            pytest 單元測試（目前 73 passed）
 app.py            Streamlit 入口
 ```
 
