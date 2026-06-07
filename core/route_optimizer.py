@@ -32,13 +32,14 @@ NEARBY_RENT_COUNT = 3
 
 @dataclass
 class RouteSegment:
-    """單一騎乘段。"""
+    """單一路段。mode 區分騎乘 / 步行換車 / 同站等待冷卻。"""
     from_station_id: str
     to_station_id: str
     from_name: str
     to_name: str
     minutes: float
     distance_km: float
+    mode: str = "ride"  # "ride" | "walk" | "wait"
 
 
 @dataclass
@@ -62,6 +63,8 @@ class RoutePlan:
     feasible: bool
     message: str = ""
     swap_advice: list[SwapAdvice] = field(default_factory=list)
+    # node-split 冷卻模型才會用到：換車的步行 + 等待冷卻總時間（分鐘）
+    transfer_minutes: float = 0.0
 
 
 def _haversine_km_vec(
