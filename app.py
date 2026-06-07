@@ -124,8 +124,20 @@ def get_graph(
 
 # ---------- UI ----------
 
+def _clear_caches_and_rerun() -> None:
+    """清除站點 / 圖快取與規劃結果，重抓最新即時資料後重跑。"""
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    for k in ("result", "google_result", "google_times", "ai_result"):
+        st.session_state.pop(k, None)
+    st.rerun()
+
+
 def render_sidebar() -> dict:
     st.sidebar.header("路線設定")
+    if st.sidebar.button("🔄 清除快取並重新整理", help="重抓最新即時車況並重建圖；"
+                         "若出現「找不到路線」常是快取的車況過舊所致"):
+        _clear_caches_and_rerun()
     cities = st.sidebar.multiselect(
         "資料來源城市（北北桃）", SUPPORTED_CITIES, default=SUPPORTED_CITIES,
         help="目前聚焦北北桃生活圈，可規劃台北↔新北↔桃園的跨縣市路線",
@@ -311,59 +323,75 @@ def _route_signature(plan: RoutePlan) -> tuple:
     return tuple((s.from_station_id, s.to_station_id) for s in plan.segments)
 
 
+def _compute_google_refinement(
+    plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]
+) -> tuple[list[dict], bool, dict[int, tuple[float, str]]]:
+    """逐段（只 ride 段）以 Google Maps 校正時間。回傳 (表格列, 是否有超時, google_times)。"""
+    coords = stations.set_index("station_id")[["lat", "lon", "city"]].to_dict("index")
+    rows: list[dict] = []
+    any_over = False
+    google_times: dict[int, tuple[float, str]] = {}
+    for i, seg in enumerate(plan.segments, 1):
+        if seg.mode != "ride":
+            continue  # 步行 / 等冷卻段不需 Google 校正
+        a = coords[seg.from_station_id]
+        b = coords[seg.to_station_id]
+        limit = fmbc.get(a["city"], max(fmbc.values()) if fmbc else 30)
+        try:
+            g_min, g_km, mode = gmaps_travel_cached(
+                a["lat"], a["lon"], b["lat"], b["lon"]
+            )
+            over = g_min > limit
+            any_over = any_over or over
+            google_times[i] = (g_min, mode)
+            rows.append({
+                "段": i, "起站": seg.from_name, "終站": seg.to_name,
+                "估算 (分)": round(seg.minutes, 1),
+                # 字串呈現，與失敗列的 "—" 同型，避免 Arrow 混型序列化失敗
+                "Google (分)": f"{g_min:.1f}",
+                "Google 模式": mode,
+                "免費上限 (分)": limit,
+                "超時": "⚠️" if over else "",
+            })
+        except GMapsError as e:
+            rows.append({
+                "段": i, "起站": seg.from_name, "終站": seg.to_name,
+                "估算 (分)": round(seg.minutes, 1),
+                "Google (分)": "—", "Google 模式": f"失敗：{e}",
+                "免費上限 (分)": limit, "超時": "",
+            })
+    return rows, any_over, google_times
+
+
+def _store_google_result(plan: RoutePlan, rows, any_over, google_times) -> None:
+    sig = _route_signature(plan)
+    st.session_state["google_result"] = {"sig": sig, "rows": rows, "any_over": any_over}
+    st.session_state["google_times"] = {"sig": sig, "data": google_times}
+
+
+def refine_with_google(plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]) -> None:
+    """計算 Google 校正並存入 session_state（規劃完成後自動呼叫）。"""
+    rows, any_over, gt = _compute_google_refinement(plan, stations, fmbc)
+    _store_google_result(plan, rows, any_over, gt)
+
+
 def render_google_refinement(
     plan: RoutePlan, stations: pd.DataFrame, fmbc: dict[str, int]
 ) -> None:
-    """用 Google Maps 校正每段騎乘時間，並與直線估算比較、標示是否超出免費上限。"""
+    """顯示 Google 校正結果；規劃時已自動跑過，這裡提供重新查詢按鈕。"""
     if not settings.google_maps_api_key():
-        st.info("（選用）在 .env 設定 GOOGLE_MAPS_API_KEY 後，可用 Google 校正真實道路時間。")
+        st.info("（選用）在 .env 設定 GOOGLE_MAPS_API_KEY 後，騎乘時間會自動以 Google 校正。")
         return
 
     sig = _route_signature(plan)
-    if st.button("🛰️ 用 Google Maps 校正騎乘時間"):
-        coords = stations.set_index("station_id")[["lat", "lon", "city"]].to_dict("index")
-        rows = []
-        any_over = False
-        google_times: dict[int, tuple[float, str]] = {}
+    if st.button("🛰️ 重新用 Google Maps 校正騎乘時間"):
         with st.spinner("查詢 Google Maps 中…"):
-            for i, seg in enumerate(plan.segments, 1):
-                if seg.mode != "ride":
-                    continue  # 步行 / 等冷卻段不需 Google 校正
-                a = coords[seg.from_station_id]
-                b = coords[seg.to_station_id]
-                limit = fmbc.get(a["city"], max(fmbc.values()) if fmbc else 30)
-                try:
-                    g_min, g_km, mode = gmaps_travel_cached(
-                        a["lat"], a["lon"], b["lat"], b["lon"]
-                    )
-                    over = g_min > limit
-                    any_over = any_over or over
-                    google_times[i] = (g_min, mode)
-                    rows.append({
-                        "段": i, "起站": seg.from_name, "終站": seg.to_name,
-                        "估算 (分)": round(seg.minutes, 1),
-                        # 字串呈現，與失敗列的 "—" 同型，避免 Arrow 混型序列化失敗
-                        "Google (分)": f"{g_min:.1f}",
-                        "Google 模式": mode,
-                        "免費上限 (分)": limit,
-                        "超時": "⚠️" if over else "",
-                    })
-                except GMapsError as e:
-                    rows.append({
-                        "段": i, "起站": seg.from_name, "終站": seg.to_name,
-                        "估算 (分)": round(seg.minutes, 1),
-                        "Google (分)": "—", "Google 模式": f"失敗：{e}",
-                        "免費上限 (分)": limit, "超時": "",
-                    })
-        # 存入 session_state，讓表格與「AI 行程建議」跨 rerun 都能取用
-        st.session_state["google_result"] = {
-            "sig": sig, "rows": rows, "any_over": any_over,
-        }
-        st.session_state["google_times"] = {"sig": sig, "data": google_times}
+            rows, any_over, gt = _compute_google_refinement(plan, stations, fmbc)
+        _store_google_result(plan, rows, any_over, gt)
 
-    # 顯示（含先前已校正的結果，只要仍對應同一路線）
     gr = st.session_state.get("google_result")
     if gr and gr["sig"] == sig:
+        st.caption("🛰️ Google Maps 校正後的各段實際時間：")
         st.dataframe(pd.DataFrame(gr["rows"]), hide_index=True, width="stretch")
         if gr["any_over"]:
             st.warning("⚠️ 依 Google 校正，部分路段實際時間超過免費上限，該段可能產生費用。")
@@ -410,19 +438,27 @@ def render_ai_feedback(
     sig = _route_signature(plan)
     if st.button("產生建議", key="ai_feedback_btn"):
         with st.spinner("整理建議中…"):
-            text, source = generate_feedback(facts, api_key, settings.gemini_model())
-        st.session_state["ai_result"] = {"sig": sig, "text": text, "source": source}
+            text, source, error = generate_feedback(
+                facts, api_key, settings.gemini_model()
+            )
+        st.session_state["ai_result"] = {
+            "sig": sig, "text": text, "source": source, "error": error,
+        }
 
     # 顯示（含先前已產生的建議，只要仍對應同一路線）
     ar = st.session_state.get("ai_result")
     if ar and ar["sig"] == sig:
         if ar["source"] == "gemini":
             st.markdown(ar["text"])
-            st.caption("由 Gemini 依客觀事實潤飾生成。")
+            st.caption(f"由 Gemini（{settings.gemini_model()}）依客觀事實潤飾生成。")
         else:
+            if api_key and ar.get("error"):
+                st.warning(
+                    f"Gemini 呼叫失敗，已改顯示本地事實摘要。原因：{ar['error']}\n\n"
+                    "常見原因：模型名稱已淘汰（請在 .env 改用 gemini-2.0-flash）、"
+                    "金鑰無效，或未啟用 Generative Language API。"
+                )
             st.text(ar["text"])
-            if api_key:
-                st.caption("Gemini 呼叫未成功，已改顯示本地事實摘要。")
 
 
 # ---------- 主流程 ----------
@@ -499,16 +535,21 @@ def main() -> None:
         else:
             o_label = f"({origin[0]:.4f}, {origin[1]:.4f})"
             d_label = f"({destination[0]:.4f}, {destination[1]:.4f})"
+        fmbc_now = free_minutes_by_city(list(inp["cities"]), inp["has_tpass"])
         st.session_state["result"] = {
             "plan": plan,
             "origin": origin, "destination": destination,
             "o_label": o_label, "d_label": d_label,
-            "fmbc": free_minutes_by_city(list(inp["cities"]), inp["has_tpass"]),
+            "fmbc": fmbc_now,
             "id_to_city": dict(zip(stations["station_id"], stations["city"])),
             "stations": stations,
             "has_tpass": inp["has_tpass"],
             "elapsed_ms": elapsed_ms,
         }
+        # 規劃完成後，若有 Google 金鑰即自動以 Google Maps 校正各段時間
+        if plan.feasible and settings.google_maps_api_key():
+            with st.spinner("以 Google Maps 校正各段騎乘時間…"):
+                refine_with_google(plan, stations, fmbc_now)
 
     result = st.session_state.get("result")
 

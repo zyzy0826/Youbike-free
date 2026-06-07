@@ -24,7 +24,7 @@
    ```toml
    GOOGLE_MAPS_API_KEY = "你的金鑰"
    GEMINI_API_KEY = "你的金鑰"
-   GEMINI_MODEL = "gemini-1.5-flash"
+   GEMINI_MODEL = "gemini-2.0-flash"
    ```
 
    > 不填也能部署：App 仍可規劃路線，只是時間用直線估算、AI 建議改本地摘要。

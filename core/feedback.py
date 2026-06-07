@@ -273,15 +273,16 @@ def polish_with_gemini(
 
 def generate_feedback(
     facts: RouteFacts, api_key: str | None, model: str = "gemini-2.0-flash",
-) -> tuple[str, str]:
-    """產生回饋。回傳 (文字, 來源)。來源為 'gemini' 或 'template'。
+) -> tuple[str, str, str]:
+    """產生回饋。回傳 (文字, 來源, 錯誤訊息)。來源為 'gemini' 或 'template'。
 
-    有金鑰且呼叫成功 → 使用 Gemini 潤飾；否則回退本地模板摘要。
+    有金鑰且呼叫成功 → 使用 Gemini 潤飾；失敗則回退本地模板摘要並附上錯誤原因，
+    讓 UI 能顯示「為何 Gemini 沒跑成功」（例如模型名稱錯誤、金鑰無效）。
     """
     facts_text = facts_to_text(facts)
     if api_key:
         try:
-            return polish_with_gemini(facts_text, api_key, model), "gemini"
-        except GeminiError:
-            return facts_text, "template"
-    return facts_text, "template"
+            return polish_with_gemini(facts_text, api_key, model), "gemini", ""
+        except GeminiError as e:
+            return facts_text, "template", str(e)
+    return facts_text, "template", ""

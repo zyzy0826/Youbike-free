@@ -125,8 +125,11 @@ def test_collect_facts_with_google_times_flags_over_limit():
 
 
 def test_generate_feedback_without_key_uses_template():
-    text, source = generate_feedback(collect_facts(_plan(), _FMBC, _ID2CITY), api_key=None)
+    text, source, error = generate_feedback(
+        collect_facts(_plan(), _FMBC, _ID2CITY), api_key=None
+    )
     assert source == "template"
+    assert error == ""
     assert "路線：" in text
 
 
@@ -147,11 +150,12 @@ def test_generate_feedback_falls_back_on_gemini_error():
     resp.raise_for_status = MagicMock()
     resp.json = MagicMock(return_value={"promptFeedback": {"blockReason": "SAFETY"}})
     with patch("core.feedback.requests.post", return_value=resp):
-        text, source = generate_feedback(
+        text, source, error = generate_feedback(
             collect_facts(_plan(), _FMBC, _ID2CITY), api_key="k"
         )
-    # Gemini 回傳無有效內容 → 回退模板
+    # Gemini 回傳無有效內容 → 回退模板，且帶回錯誤原因
     assert source == "template"
+    assert error  # 非空，含失敗原因
     assert "路線：" in text
 
 
