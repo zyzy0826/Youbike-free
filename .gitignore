@@ -6,3 +6,4 @@ data/cache/*.json
 .venv/
 venv/
 .env
+route_preview.html

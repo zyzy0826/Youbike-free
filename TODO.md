@@ -28,11 +28,12 @@
 - [x] 撰寫 route_optimizer 單元測試
 
 ## Phase 4: 地圖視覺化
-- [ ] 用 Folium 繪製所有站點（顏色依車輛狀態）
-- [ ] 繪製推薦路線 PolyLine
-- [ ] 標記換車站點（含 popup 資訊）
-- [ ] 標記起終點
-- [ ] 每段路線標示預估時間
+- [x] 用 Folium 繪製所有站點（顏色依車輛狀態）
+- [x] 繪製推薦路線 PolyLine
+- [x] 標記換車站點（含 popup 資訊）
+- [x] 標記起終點
+- [x] 每段路線標示預估時間
+- [x] 撰寫 map_renderer 單元測試
 
 ## Phase 5: Streamlit 互動介面
 - [ ] 建立基本頁面佈局（sidebar + 主區域）
