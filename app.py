@@ -194,7 +194,7 @@ def render_sidebar() -> dict:
         d_lon = st.sidebar.number_input(
             "終點經度", value=121.4456, format="%.5f", key="d_lon"
         )
-    submit = st.sidebar.button("規劃路線", type="primary", use_container_width=True)
+    submit = st.sidebar.button("規劃路線", type="primary", width="stretch")
 
     return {
         "cities": tuple(cities),
@@ -239,13 +239,26 @@ def render_itinerary(
 ) -> None:
     if not plan.feasible or not plan.segments:
         return
-    mode_label = {"ride": "🚲 騎乘", "walk": "🚶 步行換車", "wait": "⏱️ 等冷卻"}
+    df = itinerary_dataframe(plan, fmbc, id_to_city)
+    st.dataframe(df, hide_index=True, width="stretch")
+
+
+_MODE_LABEL = {"ride": "🚲 騎乘", "walk": "🚶 步行換車", "wait": "⏱️ 等冷卻"}
+
+
+def itinerary_dataframe(
+    plan: RoutePlan, fmbc: dict[str, int], id_to_city: dict[str, str]
+) -> pd.DataFrame:
+    """建構詳細行程 DataFrame。
+
+    可能含 ride / walk / wait 混合段；「免費上限 / 免費餘裕」欄對轉乘段為 "—"，
+    故整欄統一以字串呈現，避免 pandas→Arrow 混型（int 與 str）序列化失敗。
+    """
     rows = []
     for i, seg in enumerate(plan.segments, 1):
         if seg.mode != "ride":
-            # 步行換車 / 等冷卻段：無免費上限概念
             rows.append({
-                "段": i, "類型": mode_label.get(seg.mode, seg.mode),
+                "段": i, "類型": _MODE_LABEL.get(seg.mode, seg.mode),
                 "起站": seg.from_name, "終站": seg.to_name, "起站縣市": "",
                 "免費上限 (分)": "—", "時間 (分)": round(seg.minutes, 1),
                 "距離 (km)": round(seg.distance_km, 2), "免費餘裕 (分)": "—",
@@ -256,13 +269,12 @@ def render_itinerary(
         limit = fmbc.get(city, max(fmbc.values()) if fmbc else 30)
         margin = limit - seg.minutes
         rows.append({
-            "段": i, "類型": mode_label["ride"],
+            "段": i, "類型": _MODE_LABEL["ride"],
             "起站": seg.from_name, "終站": seg.to_name, "起站縣市": city,
-            "免費上限 (分)": limit, "時間 (分)": round(seg.minutes, 1),
-            "距離 (km)": round(seg.distance_km, 2), "免費餘裕 (分)": round(margin, 1),
+            "免費上限 (分)": str(limit), "時間 (分)": round(seg.minutes, 1),
+            "距離 (km)": round(seg.distance_km, 2), "免費餘裕 (分)": f"{margin:.1f}",
         })
-    df = pd.DataFrame(rows)
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    return pd.DataFrame(rows)
 
 
 def render_cooldown_advice(plan: RoutePlan) -> None:
@@ -290,7 +302,7 @@ def render_cooldown_advice(plan: RoutePlan) -> None:
                 for name, walk_min, dist, bikes in adv.alternatives
             ]
             st.dataframe(
-                pd.DataFrame(alt_rows), hide_index=True, use_container_width=True
+                pd.DataFrame(alt_rows), hide_index=True, width="stretch"
             )
 
 
@@ -330,7 +342,8 @@ def render_google_refinement(
                 rows.append({
                     "段": i, "起站": seg.from_name, "終站": seg.to_name,
                     "估算 (分)": round(seg.minutes, 1),
-                    "Google (分)": round(g_min, 1),
+                    # 字串呈現，與失敗列的 "—" 同型，避免 Arrow 混型序列化失敗
+                    "Google (分)": f"{g_min:.1f}",
                     "Google 模式": mode,
                     "免費上限 (分)": limit,
                     "超時": "⚠️" if over else "",
@@ -346,7 +359,7 @@ def render_google_refinement(
     st.session_state["google_times"] = {
         "sig": _route_signature(plan), "data": google_times,
     }
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     if any_over:
         st.warning("⚠️ 依 Google 校正，部分路段實際時間超過免費上限，該段可能產生費用。")
     else:

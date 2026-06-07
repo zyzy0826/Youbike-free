@@ -4,6 +4,6 @@ requests>=2.31
 networkx>=3.0
 geopy>=2.4
 folium>=0.15
-streamlit>=1.30
+streamlit>=1.43
 streamlit-folium>=0.18
 pytest>=7.4
