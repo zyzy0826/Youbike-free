@@ -12,6 +12,7 @@ from typing import Literal
 import networkx as nx
 import pandas as pd
 
+from config import CROSS_CIRCLE_FEE_NTD
 from core.time_estimator import estimate_walking_time, haversine_km
 
 
@@ -134,6 +135,20 @@ def plan_route(
         return _fail(f"圖中找不到節點: {e}")
 
     segments, total = _build_segments(graph, node_path)
+
+    cross_circle_segments = [
+        s for s in segments
+        if graph.nodes[s.from_station_id].get("circle")
+        != graph.nodes[s.to_station_id].get("circle")
+    ]
+    msg = ""
+    if cross_circle_segments:
+        lo, hi = CROSS_CIRCLE_FEE_NTD
+        msg = (
+            f"⚠️ 路線包含 {len(cross_circle_segments)} 段跨生活圈騎乘，"
+            f"還車時可能被收 {lo}~{hi} 元調度費（即非全程免費）"
+        )
+
     return RoutePlan(
         segments=segments,
         total_minutes=total,
@@ -142,4 +157,5 @@ def plan_route(
         walk_from_end_min=walk_from_end,
         strategy=strategy,
         feasible=True,
+        message=msg,
     )

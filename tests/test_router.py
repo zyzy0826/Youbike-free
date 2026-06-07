@@ -79,6 +79,33 @@ def test_origin_too_far_from_any_station():
     assert "起點" in plan.message
 
 
+def test_cross_circle_edges_blocked_by_default():
+    # 一站在台北市（北北桃），一站在高雄市（嘉南高屏），距離雖近但不該連邊
+    cross = _make_stations([
+        {"station_id": "TP", "name": "TP", "lat": 25.0, "lon": 121.5,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "KH", "name": "KH", "lat": 25.0, "lon": 121.5005,
+         "available_bikes": 5, "available_docks": 5, "city": "高雄市"},
+    ])
+    g = build_station_graph(cross, 30, 3, 12.0, 1.3)
+    assert not g.has_edge("TP", "KH")
+    assert not g.has_edge("KH", "TP")
+
+
+def test_cross_circle_edges_allowed_with_flag():
+    cross = _make_stations([
+        {"station_id": "TP", "name": "TP", "lat": 25.0, "lon": 121.5,
+         "available_bikes": 5, "available_docks": 5, "city": "台北市"},
+        {"station_id": "KH", "name": "KH", "lat": 25.0, "lon": 121.5005,
+         "available_bikes": 5, "available_docks": 5, "city": "高雄市"},
+    ])
+    g = build_station_graph(cross, 30, 3, 12.0, 1.3, allow_cross_circle=True)
+    assert g.has_edge("TP", "KH")
+    plan = plan_route(g, cross, (25.0, 121.5), (25.0, 121.5005))
+    assert plan.feasible
+    assert "調度費" in plan.message
+
+
 def test_no_path_returns_friendly_message():
     isolated = _make_stations([
         {"station_id": "X", "name": "X", "lat": 25.0, "lon": 121.5,

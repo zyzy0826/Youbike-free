@@ -46,6 +46,17 @@ LIVING_CIRCLES = {
     "嘉南高屏": ["嘉義市", "嘉義縣", "台南市", "高雄市", "屏東縣"],
 }
 
+# 跨生活圈調度費（NTD）—— 用於警告訊息
+CROSS_CIRCLE_FEE_NTD = (600, 1135)
+
+
+def city_to_circle(city: str) -> str | None:
+    """回傳該縣市所屬生活圈名稱；找不到回傳 None。"""
+    for circle, members in LIVING_CIRCLES.items():
+        if city in members:
+            return circle
+    return None
+
 # 騎乘參數預設值
 DEFAULT_CYCLING_SPEED_KMH = 12      # 平均騎乘速度
 ROUTE_DETOUR_FACTOR = 1.3           # 實際路徑 vs 直線距離修正係數

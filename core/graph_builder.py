@@ -8,6 +8,7 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 
+from config import city_to_circle
 from core.time_estimator import estimate_riding_time, haversine_km
 
 
@@ -17,6 +18,7 @@ def build_station_graph(
     safety_margin: int,
     speed_kmh: float,
     detour_factor: float,
+    allow_cross_circle: bool = False,
 ) -> nx.DiGraph:
     """以站點 DataFrame 建立有向圖。
 
@@ -27,16 +29,23 @@ def build_station_graph(
         speed_kmh: 平均騎乘時速。
         detour_factor: 路徑修正係數。
 
+    Args:
+        allow_cross_circle: 預設 False，禁止連接不同生活圈的站點
+            （跨生活圈還車會被收 600~1135 元調度費）。設 True 解鎖。
+
     Returns:
         NetworkX 有向圖。
-        節點屬性：name, lat, lon, available_bikes, available_docks, city。
+        節點屬性：name, lat, lon, available_bikes, available_docks, city, circle。
         邊屬性：weight（騎乘時間，分鐘）、distance_km。
     """
     max_minutes = free_minutes - safety_margin
     max_km = max_minutes * speed_kmh / 60 / detour_factor
 
     g = nx.DiGraph()
+    circles: list[str | None] = []
     for _, row in stations.iterrows():
+        circle = city_to_circle(row["city"])
+        circles.append(circle)
         g.add_node(
             row["station_id"],
             name=row["name"],
@@ -45,6 +54,7 @@ def build_station_graph(
             available_bikes=int(row["available_bikes"] or 0),
             available_docks=int(row["available_docks"] or 0),
             city=row["city"],
+            circle=circle,
         )
 
     ids = stations["station_id"].to_numpy()
@@ -58,6 +68,8 @@ def build_station_graph(
     for i in range(n):
         lat_i, lon_i = lats[i], lons[i]
         for j in _candidate_indices(i, lats, lons, lat_window):
+            if not allow_cross_circle and circles[i] != circles[j]:
+                continue
             dist = haversine_km(lat_i, lon_i, lats[j], lons[j])
             if dist > max_km:
                 continue
