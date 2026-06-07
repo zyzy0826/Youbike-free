@@ -16,6 +16,11 @@ CITY_CONFIG = {
         "living_circle": "北北桃",
         "note": "2025/3/1 起前 30 分鐘免費",
     },
+    # 接入待辦：填入實際 api_url 即可。若 API 把站點清單包在巢狀 dict
+    # （如 CKAN：{"result": {"records": [...]}}），加上
+    #   "data_path": ["result", "records"]
+    # fetcher 會自動取出清單；欄位名稱差異由 preprocessor.FIELD_MAP 處理。
+    # 若 API 憑證有瑕疵，加上 "verify_ssl": False。
     "桃園市": {
         "free_minutes": 60,
         "eligibility": "TPASS 月票",

@@ -66,11 +66,29 @@ def fetch_city_stations(
     except requests.RequestException as e:
         raise FetchError(f"擷取 {city} 失敗: {e}") from e
 
+    # 部分開放資料 API（如 CKAN data.gov.tw）會把站點清單包在巢狀 dict 裡，
+    # 例如 {"result": {"records": [...]}}。以 data_path 設定取出實際清單。
+    data_path = cfg.get("data_path")
+    if data_path:
+        data = _extract_nested(city, data, data_path)
+
     if not isinstance(data, list):
         raise FetchError(f"{city} API 回傳格式非 list: {type(data).__name__}")
 
     _save_cache(city, data, base)
     return data
+
+
+def _extract_nested(city: str, data: Any, path: list[str]) -> Any:
+    """依 path 逐層深入巢狀 dict，取出實際的站點清單。"""
+    cur = data
+    for key in path:
+        if not isinstance(cur, dict) or key not in cur:
+            raise FetchError(
+                f"{city} API 回傳缺少預期欄位 '{key}'（data_path={path}）"
+            )
+        cur = cur[key]
+    return cur
 
 
 def _cache_path(city: str, base: Path) -> Path:

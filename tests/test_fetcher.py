@@ -84,3 +84,27 @@ def test_non_list_response_raises(tmp_cache: Path):
     with patch("data.fetcher.requests.get", return_value=_FakeResp({"oops": True})):
         with pytest.raises(FetchError):
             fetch_city_stations("台北市", use_cache=False, cache_dir=tmp_cache)
+
+
+def test_data_path_extracts_nested_list(tmp_cache: Path):
+    # 模擬 CKAN 風格巢狀回傳 {"result": {"records": [...]}}
+    nested = {"result": {"records": SAMPLE_STATIONS}}
+    cfg = {
+        "api_url": "https://example.com/api",
+        "data_path": ["result", "records"],
+    }
+    with patch.dict("data.fetcher.CITY_CONFIG", {"測試市": cfg}), \
+            patch("data.fetcher.requests.get", return_value=_FakeResp(nested)):
+        data = fetch_city_stations("測試市", use_cache=False, cache_dir=tmp_cache)
+    assert data == SAMPLE_STATIONS
+
+
+def test_data_path_missing_key_raises(tmp_cache: Path):
+    cfg = {
+        "api_url": "https://example.com/api",
+        "data_path": ["result", "records"],
+    }
+    with patch.dict("data.fetcher.CITY_CONFIG", {"測試市": cfg}), \
+            patch("data.fetcher.requests.get", return_value=_FakeResp({"result": {}})):
+        with pytest.raises(FetchError, match="缺少預期欄位"):
+            fetch_city_stations("測試市", use_cache=False, cache_dir=tmp_cache)
