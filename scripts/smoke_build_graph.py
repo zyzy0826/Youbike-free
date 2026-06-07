@@ -1,9 +1,13 @@
 """煙霧測試：抓台北資料 → 正規化 → 過濾 → 建圖，量測耗時。"""
+import sys
 import time
+from pathlib import Path
 
-from data.fetcher import fetch_city_stations
-from data.preprocessor import filter_invalid_stations, normalize_stations
-from core.graph_builder import build_station_graph
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from data.fetcher import fetch_city_stations  # noqa: E402
+from data.preprocessor import filter_invalid_stations, normalize_stations  # noqa: E402
+from core.graph_builder import build_station_graph  # noqa: E402
 
 
 def main() -> None:
