@@ -1,0 +1,16 @@
+"""設定模組：各縣市規則與騎乘參數。"""
+from .city_rules import (
+    CITY_CONFIG,
+    LIVING_CIRCLES,
+    DEFAULT_CYCLING_SPEED_KMH,
+    ROUTE_DETOUR_FACTOR,
+    SAFETY_MARGIN_MINUTES,
+)
+
+__all__ = [
+    "CITY_CONFIG",
+    "LIVING_CIRCLES",
+    "DEFAULT_CYCLING_SPEED_KMH",
+    "ROUTE_DETOUR_FACTOR",
+    "SAFETY_MARGIN_MINUTES",
+]
