@@ -87,8 +87,11 @@ def load_stations(cities: tuple[str, ...]) -> pd.DataFrame:
         except (FetchError, ValueError) as e:
             failures.append((city, str(e)))
     if failures:
-        for c, msg in failures:
-            st.warning(f"擷取 {c} 失敗：{msg}")
+        for _c, msg in failures:
+            # msg 本身已含縣市與原因，避免重複前綴
+            st.warning(f"⚠️ {msg}")
+        if dfs:
+            st.caption("（仍可規劃已成功載入城市的路線；上述城市的站點本次未納入。）")
     if not dfs:
         return pd.DataFrame()
     return filter_invalid_stations(merge_cities(dfs))

@@ -87,6 +87,32 @@ def test_non_list_response_raises(tmp_cache: Path):
             fetch_city_stations("台北市", use_cache=False, cache_dir=tmp_cache)
 
 
+def test_connect_timeout_retries_and_friendly_error(tmp_cache: Path):
+    import requests
+    from data.fetcher import MAX_ATTEMPTS
+
+    with patch("data.fetcher.requests.get",
+               side_effect=requests.ConnectTimeout("timed out")) as mock_get:
+        with pytest.raises(FetchError, match="連線逾時，已略過該市"):
+            fetch_city_stations("台北市", use_cache=False, cache_dir=tmp_cache)
+    # 暫時性逾時應重試到 MAX_ATTEMPTS 次
+    assert mock_get.call_count == MAX_ATTEMPTS
+
+
+def test_http_error_not_retried(tmp_cache: Path):
+    import requests
+
+    resp = _FakeResp({"x": 1})
+    def _raise():
+        raise requests.HTTPError("500 Server Error")
+    resp.raise_for_status = _raise
+    with patch("data.fetcher.requests.get", return_value=resp) as mock_get:
+        with pytest.raises(FetchError, match="擷取失敗"):
+            fetch_city_stations("台北市", use_cache=False, cache_dir=tmp_cache)
+    # 非暫時性錯誤（HTTP 4xx/5xx）不重試
+    assert mock_get.call_count == 1
+
+
 def test_data_path_extracts_nested_list(tmp_cache: Path):
     # 模擬 CKAN 風格巢狀回傳 {"result": {"records": [...]}}
     nested = {"result": {"records": SAMPLE_STATIONS}}

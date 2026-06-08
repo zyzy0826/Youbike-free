@@ -8,6 +8,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 import urllib3
@@ -20,7 +21,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CACHE_DIR = Path(__file__).parent / "cache"
 DEFAULT_CACHE_TTL_SECONDS = 300  # 5 分鐘
-REQUEST_TIMEOUT = 15
+# (連線逾時, 讀取逾時)；連線設短一點，伺服器無回應時可快速失敗、不卡住 UI。
+REQUEST_TIMEOUT: tuple[int, int] = (5, 15)
+MAX_ATTEMPTS = 2  # 對暫時性連線/逾時錯誤重試一次
 
 
 class FetchError(RuntimeError):
@@ -59,12 +62,7 @@ def fetch_city_stations(
         if cached is not None:
             return cached
 
-    try:
-        resp = requests.get(api_url, timeout=REQUEST_TIMEOUT, verify=verify_ssl)
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.RequestException as e:
-        raise FetchError(f"擷取 {city} 失敗: {e}") from e
+    data = _request_json(city, api_url, verify_ssl)
 
     # 部分開放資料 API（如 CKAN data.gov.tw）會把站點清單包在巢狀 dict 裡，
     # 例如 {"result": {"records": [...]}}。以 data_path 設定取出實際清單。
@@ -77,6 +75,26 @@ def fetch_city_stations(
 
     _save_cache(city, data, base)
     return data
+
+
+def _request_json(city: str, api_url: str, verify_ssl: bool) -> Any:
+    """GET 並回傳 JSON；對連線/逾時類暫時性錯誤重試，失敗時擲出精簡友善訊息。"""
+    host = urlparse(api_url).hostname or api_url
+    last_err: Exception | None = None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            resp = requests.get(api_url, timeout=REQUEST_TIMEOUT, verify=verify_ssl)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_err = e  # 暫時性：連線逾時 / 連不上 → 重試
+            continue
+        except requests.RequestException as e:
+            raise FetchError(f"{city} 擷取失敗（{host}）：{e}") from e
+
+    if isinstance(last_err, requests.Timeout):
+        raise FetchError(f"{city} 資料來源 {host} 連線逾時，已略過該市") from last_err
+    raise FetchError(f"{city} 資料來源 {host} 連線失敗，已略過該市") from last_err
 
 
 def _extract_nested(city: str, data: Any, path: list[str]) -> Any:
