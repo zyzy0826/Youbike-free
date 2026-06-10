@@ -1,0 +1,26 @@
+name: Keep Streamlit Awake
+
+# 每 10 小時推一次空 commit，避免 Streamlit Community Cloud 因閒置而休眠。
+on:
+  schedule:
+    # cron 為 UTC 時間，於每天 0、10、20 時觸發（約每 10 小時一次）
+    - cron: "0 */10 * * *"
+  # 也允許手動觸發
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keep-awake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Push empty commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep streamlit awake [skip ci]"
+          git push
