@@ -1,6 +1,7 @@
 name: Keep Streamlit Awake
 
-# 每 10 小時推一次空 commit，避免 Streamlit Community Cloud 因閒置而休眠。
+# 每 10 小時 ping 一次 Streamlit app，用流量避免 Community Cloud 因閒置而休眠。
+# 不再推空 commit，所以不會污染 git 歷史、也不會觸發重新部署。
 on:
   schedule:
     # cron 為 UTC 時間，於每天 0、10、20 時觸發（約每 10 小時一次）
@@ -9,18 +10,32 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  APP_URL: https://zyzy0826.streamlit.app/
 
 jobs:
   keep-awake:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Push empty commit
+      - name: Ping app
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore: keep streamlit awake [skip ci]"
-          git push
+          # Streamlit 首次請求會 303 導去 share.streamlit.io 做 auth cookie handshake，
+          # 所以必須帶 cookie jar，否則會卡在無限轉址。
+          # 重試 3 次，避免偶發的網路抖動讓 workflow 亮紅燈
+          jar="$RUNNER_TEMP/cookies.txt"
+          for attempt in 1 2 3; do
+            code=$(curl -sSL -o /dev/null -w '%{http_code}' \
+                     --max-time 60 --max-redirs 10 \
+                     -c "$jar" -b "$jar" \
+                     -A "keep-awake-bot (github-actions)" \
+                     "$APP_URL" || echo 000)
+            echo "attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Failed to reach $APP_URL after 3 attempts (last status: $code)"
+          exit 1
