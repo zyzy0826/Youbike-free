@@ -1,8 +1,8 @@
 # YouBike 最省錢騎乘攻略
 
 在地圖上選定出發點與終點，系統自動規劃**全程免費**的 YouBike 騎乘路線。
-核心策略：利用各縣市的免費騎乘時間（台北/新北 30 分鐘、桃園一般 30 分鐘、
-持 TPASS 月票 60 分鐘），透過中途換車，讓每一段騎乘時間都控制在免費上限內。
+核心策略：利用各縣市的免費騎乘時間（台北/新北 30 分鐘、桃園 60 分鐘；
+電輔車 2.0E 不適用免費時段，不列入可借車數），透過中途換車，讓每一段騎乘時間都控制在免費上限內。
 
 ## 解決什麼問題
 
@@ -12,7 +12,8 @@ YouBike 對較長距離的單趟騎乘會開始收費。但只要在免費時間
 
 ## 功能特性
 
-- **多縣市資料整合**：即時抓取台北、新北、桃園 YouBike 開放資料（含 JSON 快取）；
+- **多縣市資料整合**：即時抓取台北、新北、桃園 YouBike 開放資料，另以 YouBike 官方全台資料
+  支援竹竹苗、台中、嘉南高屏、台東（含 JSON 快取）；在「⚙ 偏好」先選區域、一次只載入一個區域；
   fetcher 支援巢狀回傳格式（如 CKAN `result.records`），補上 API URL 即可擴充縣市
 - **兩種規劃策略**
   - `fewest_swaps`：最少換車次數（BFS）
@@ -92,8 +93,9 @@ GEMINI_MODEL=gemini-2.5-flash
 streamlit run app.py
 ```
 
-側欄可切換城市、是否持 TPASS、規劃策略、即時車況過濾、以及用地址或經緯度
-輸入起終點。規劃後可按「用 Google Maps 校正騎乘時間」與「產生 AI 建議」。
+地圖鋪滿整個畫面，左上角的搜尋卡（手機在最上面）用地址或經緯度輸入起終點、選規劃策略；
+「⚙ 偏好」可切換區域與城市、是否持 TPASS、騎乘速度、即時車況過濾。規劃結果在左下角的結果卡
+（手機貼在畫面底部，可收起來多看一點地圖）。規劃後可按「用 Google Maps 校正騎乘時間」與「產生 AI 建議」。
 
 CLI 煙霧測試（驗證資料管線與路徑演算法）：
 
@@ -104,9 +106,14 @@ python scripts/smoke_render_map.py    # 產出 route_preview.html
 
 ## 部署
 
-部署到 Streamlit Community Cloud 的完整步驟（含 Secrets 設定）見 [DEPLOY.md](DEPLOY.md)。
-`.streamlit/config.toml` 為主題與伺服器設定；金鑰透過 Streamlit Secrets 提供，
-啟動時會自動橋接到環境變數。
+有兩種方式，完整步驟見 [DEPLOY.md](DEPLOY.md)：
+
+- **自己架設（Docker）**：App 跑在自己的電腦上，不會休眠。裝好 Docker 後執行
+  `docker compose up -d --build`，再開 <http://localhost:8501>。要給外面的人用，
+  可以再開啟 Cloudflare Tunnel 取得公開網址。
+- **Streamlit Community Cloud**：免費託管，但閒置約 12 小時會休眠。
+  `.streamlit/config.toml` 為主題與伺服器設定；金鑰透過 Streamlit Secrets 提供，
+  啟動時會自動橋接到環境變數。
 
 ## 開發進度
 

@@ -4,11 +4,13 @@
 """
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import networkx as nx
 import pandas as pd
 
-from config import city_to_circle
+from config import city_to_circle, return_fee_ntd
 from core.time_estimator import estimate_riding_time, haversine_km
 
 
@@ -23,6 +25,7 @@ def build_station_graph(
     min_bikes: int = 1,
     min_docks: int = 1,
     free_minutes_by_city: dict[str, int] | None = None,
+    progress: Callable[[float], None] | None = None,
 ) -> nx.DiGraph:
     """以站點 DataFrame 建立有向圖。
 
@@ -33,8 +36,8 @@ def build_station_graph(
         safety_margin: 安全餘裕（分鐘）。實際上限 = free_minutes - safety_margin。
         speed_kmh: 平均騎乘時速。
         detour_factor: 路徑修正係數。
-        allow_cross_circle: 預設 False，禁止連接不同生活圈的站點
-            （跨生活圈還車會被收 600~1135 元調度費）。設 True 解鎖。
+        allow_cross_circle: 預設 False，禁止連接「還車需付跨區調度費」的站點對
+            （依 config.return_fee_ntd，600~1135 元）。設 True 解鎖。
         require_availability: 預設 False。設 True 時依即時車輛數過濾邊：
             借不到車（available_bikes < min_bikes）的站不會有出邊；
             還不了車（available_docks < min_docks）的站不會有入邊。
@@ -43,6 +46,7 @@ def build_station_graph(
         free_minutes_by_city: {縣市: 免費上限} 對照。提供時，每條邊的免費時限
             依「起點（借車）站所在縣市」決定——因為免費規則以借車地為準。
             未列於對照中的縣市退回 free_minutes。
+        progress: 選用。建圖時會不定期呼叫 progress(已完成比例 0~1)，讓畫面顯示進度。
 
     Returns:
         NetworkX 有向圖。
@@ -90,10 +94,13 @@ def build_station_graph(
             return global_max_minutes
         return free_minutes_by_city.get(cities[idx], free_minutes) - safety_margin
 
-    # 用經緯度粗略過濾再算 haversine：1 度緯度 ≈ 111km
+    # 用經緯度粗略過濾再算 haversine：1 度緯度 ≈ 111km（經度視窗見 _candidate_indices）
     lat_window = global_max_km / 111.0
 
+    report_every = max(1, n // 100)
     for i in range(n):
+        if progress is not None and i % report_every == 0:
+            progress(i / n)
         # 借不到車的站無法作為某段騎乘的起點 → 直接跳過其所有出邊
         if require_availability and bikes[i] < min_bikes:
             continue
@@ -101,7 +108,7 @@ def build_station_graph(
         max_minutes_i = _max_minutes_for(i)  # 免費規則以借車地（起點 i）為準
         max_km_i = max_minutes_i * speed_kmh / 60 / detour_factor
         for j in _candidate_indices(i, lats, lons, lat_window):
-            if not allow_cross_circle and circles[i] != circles[j]:
+            if not allow_cross_circle and return_fee_ntd(cities[i], cities[j]) > 0:
                 continue
             # 還不了車的站無法作為某段騎乘的終點 → 不連入邊
             if require_availability and docks[j] < min_docks:
@@ -114,13 +121,20 @@ def build_station_graph(
             )
             if minutes <= max_minutes_i:
                 g.add_edge(ids[i], ids[j], weight=minutes, distance_km=dist)
+    if progress is not None:
+        progress(1.0)
     return g
 
 
 def _candidate_indices(
     i: int, lats: np.ndarray, lons: np.ndarray, lat_window: float
 ) -> np.ndarray:
-    """粗略地用緯度視窗過濾候選鄰居，回傳 index 陣列（排除自己）。"""
-    mask = np.abs(lats - lats[i]) <= lat_window
+    """用緯度與經度視窗粗篩候選鄰居，回傳 index 陣列（排除自己）。
+
+    經度 1 度的實際長度約為 111km × cos(緯度)，故經度視窗需除以 cos(緯度) 放寬；
+    多了經度條件後，東西向很遠的站不必再逐一算 haversine。
+    """
+    lon_window = lat_window / max(np.cos(np.radians(lats[i])), 0.1)
+    mask = (np.abs(lats - lats[i]) <= lat_window) & (np.abs(lons - lons[i]) <= lon_window)
     mask[i] = False
     return np.where(mask)[0]
